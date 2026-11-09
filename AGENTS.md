@@ -15,7 +15,9 @@
 
 ## Scope
 
-- Modify this repository only. Do not edit sibling product repositories.
+- Framework changes belong in this repository. Sibling product repositories
+  may be read and edited when the task requires it, but framework behavior
+  stays in ZSUI and product behavior stays in the product.
 - Keep product data, persistence, sync and business behavior outside ZSUI.
 - Public documentation describes ZSUI as its own framework and should not carry
   external product history.

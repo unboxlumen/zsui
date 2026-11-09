@@ -7,8 +7,9 @@ history remain authoritative for implementation status.
 ## Product boundary
 
 - ZSUI is an independent, publishable, Rust-first native UI framework.
-- Work for this project changes only the ZSUI repository. Sibling product
-  repositories are read-only implementation references.
+- This project owns framework changes in the ZSUI repository. Sibling product
+  repositories may be read and edited when the task requires it, but framework
+  behavior stays in ZSUI and product behavior stays in the product.
 - Reuse proven generic platform techniques where useful, but keep product
   data, persistence, synchronization and business workflows outside ZSUI.
 - Public documentation describes ZSUI on its own terms and does not carry
