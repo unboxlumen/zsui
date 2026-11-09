@@ -861,7 +861,7 @@ fn linux_accelerator_label(accelerator: crate::ZsAccelerator) -> String {
         .replace("Super+", "Super+")
 }
 
-#[cfg(feature = "linux-direct")]
+#[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
 fn menu_font_description() -> pango::FontDescription {
     let configured = std::env::var("ZSUI_LINUX_UI_FONT")
         .ok()
@@ -870,7 +870,7 @@ fn menu_font_description() -> pango::FontDescription {
     pango::FontDescription::from_string(&configured)
 }
 
-#[cfg(feature = "linux-direct")]
+#[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
 impl LinuxMenuTextMetrics for pango::Context {
     fn measure_menu_text(&self, text: &str) -> (i32, i32) {
         let layout = pango::Layout::new(self);
@@ -880,13 +880,13 @@ impl LinuxMenuTextMetrics for pango::Context {
     }
 }
 
-#[cfg(feature = "linux-direct")]
+#[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
 pub(crate) struct LinuxCairoMenuCanvas<'a> {
     context: &'a Context,
     pango_context: &'a pango::Context,
 }
 
-#[cfg(feature = "linux-direct")]
+#[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
 impl<'a> LinuxCairoMenuCanvas<'a> {
     pub(crate) const fn new(context: &'a Context, pango_context: &'a pango::Context) -> Self {
         Self {
@@ -896,7 +896,7 @@ impl<'a> LinuxCairoMenuCanvas<'a> {
     }
 }
 
-#[cfg(feature = "linux-direct")]
+#[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
 impl LinuxMenuCanvas for LinuxCairoMenuCanvas<'_> {
     fn fill_rect(&mut self, rect: Rect, color: Color) {
         set_source(self.context, color);
@@ -942,6 +942,110 @@ impl LinuxMenuCanvas for LinuxCairoMenuCanvas<'_> {
         set_source(self.context, color);
         self.context.move_to(f64::from(x), f64::from(y));
         pangocairo::functions::show_layout(self.context, &layout);
+    }
+}
+
+#[cfg(feature = "linux-direct-rust-text")]
+pub(crate) struct LinuxCairoRustMenuCanvas<'a> {
+    context: &'a Context,
+    text_system: &'a crate::linux_rust_text::LinuxRustTextSystem,
+    scale_factor: f32,
+}
+
+#[cfg(feature = "linux-direct-rust-text")]
+impl<'a> LinuxCairoRustMenuCanvas<'a> {
+    pub(crate) const fn new(
+        context: &'a Context,
+        text_system: &'a crate::linux_rust_text::LinuxRustTextSystem,
+        scale_factor: f32,
+    ) -> Self {
+        Self {
+            context,
+            text_system,
+            scale_factor,
+        }
+    }
+}
+
+#[cfg(feature = "linux-direct-rust-text")]
+impl LinuxMenuCanvas for LinuxCairoRustMenuCanvas<'_> {
+    fn fill_rect(&mut self, rect: Rect, color: Color) {
+        set_source(self.context, color);
+        self.context.rectangle(
+            f64::from(rect.x),
+            f64::from(rect.y),
+            f64::from(rect.width.max(0)),
+            f64::from(rect.height.max(0)),
+        );
+        let _ = self.context.fill();
+    }
+
+    fn fill_round_rect(&mut self, rect: Rect, radius: f64, color: Color) {
+        draw_round_rect(self.context, rect, radius);
+        set_source(self.context, color);
+        let _ = self.context.fill();
+    }
+
+    fn stroke_round_rect(&mut self, rect: Rect, radius: f64, color: Color, width: f32) {
+        draw_round_rect(self.context, rect, radius);
+        set_source(self.context, color);
+        self.context.set_line_width(f64::from(width.max(0.5)));
+        let _ = self.context.stroke();
+    }
+
+    fn draw_text(
+        &mut self,
+        text: &str,
+        bounds: Rect,
+        color: Color,
+        placement: LinuxMenuTextPlacement,
+    ) {
+        let mut style = crate::TextStyle::line(
+            self.text_system.ui_family().to_string(),
+            14.0 * self.text_system.ui_scale(),
+            color,
+        );
+        style.line_height = 20.0 * self.text_system.ui_scale();
+        style.ellipsis = true;
+        style.vertical_align = crate::VerticalAlign::Center;
+        style.horizontal_align = match placement {
+            LinuxMenuTextPlacement::Start => crate::HorizontalAlign::Start,
+            LinuxMenuTextPlacement::Center => crate::HorizontalAlign::Center,
+            LinuxMenuTextPlacement::End => crate::HorizontalAlign::End,
+        };
+        let Some(raster) = self
+            .text_system
+            .rasterize(text, &style, bounds, self.scale_factor, 0)
+        else {
+            return;
+        };
+        let width = raster.width;
+        let height = raster.height;
+        let stride = raster.stride;
+        let x = f64::from(raster.x);
+        let y = f64::from(raster.y);
+        let Ok(surface) = cairo::ImageSurface::create_for_data(
+            raster.pixels,
+            cairo::Format::ARgb32,
+            width as i32,
+            height as i32,
+            stride as i32,
+        ) else {
+            return;
+        };
+        let (device_x, device_y) = self.context.user_to_device(x, y);
+        if self.context.save().is_err() {
+            return;
+        }
+        self.context.identity_matrix();
+        if self
+            .context
+            .set_source_surface(&surface, device_x, device_y)
+            .is_ok()
+        {
+            let _ = self.context.paint();
+        }
+        let _ = self.context.restore();
     }
 }
 

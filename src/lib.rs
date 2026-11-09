@@ -63,6 +63,8 @@ pub mod badge;
 #[cfg(feature = "breadcrumb")]
 #[doc(hidden)]
 pub mod breadcrumb;
+#[cfg(feature = "bundled-ui-font")]
+mod bundled_font;
 #[cfg(feature = "calculator")]
 #[doc(hidden)]
 pub mod calculator;
@@ -175,6 +177,12 @@ mod linux_gtk_renderer;
 #[cfg(all(target_os = "linux", not(target_env = "ohos"), feature = "linux-gtk"))]
 #[doc(hidden)]
 pub mod linux_gtk_services;
+#[cfg(all(
+    target_os = "linux",
+    not(target_env = "ohos"),
+    feature = "linux-direct-rust-text"
+))]
+mod linux_rust_text;
 #[cfg(all(
     target_os = "linux",
     not(target_env = "ohos"),

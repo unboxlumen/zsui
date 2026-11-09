@@ -410,14 +410,12 @@ fn inputs_page(state: &GalleryState) -> ViewNode<Msg> {
                 .id(CHECKBOX_INPUT)
                 .on_toggle(Msg::Checkbox),
             row([
-                text("通知 / Notifications"),
-                spacer(),
+                text("通知 / Notifications").flex(1.0),
                 toggle(state.toggle).id(TOGGLE_INPUT).on_toggle(Msg::Toggle),
             ])
             .gap(Dp::new(8.0)),
             row([
-                text("深色模式 / Dark mode"),
-                spacer(),
+                text("深色模式 / Dark mode").flex(1.0),
                 toggle(state.dark).on_toggle(Msg::Dark),
             ])
             .gap(Dp::new(8.0)),
@@ -439,7 +437,7 @@ fn inputs_page(state: &GalleryState) -> ViewNode<Msg> {
                     state.slider,
                     ProgressRange::new(0.0, 100.0),
                 )),
-                spacer(),
+                spacer().flex(1.0),
             ])
             .height(Dp::new(40.0))
             .gap(Dp::new(12.0)),
@@ -1053,8 +1051,8 @@ fn view(state: &GalleryState) -> ViewNode<Msg> {
                 "深色 / Dark"
             } else {
                 "浅色 / Light"
-            }),
-            spacer(),
+            })
+            .flex(1.0),
             toggle(state.dark).on_toggle(Msg::Dark),
         ])
         .gap(Dp::new(8.0)),

@@ -84,7 +84,7 @@ pub fn zsui_feature_manifest() -> Vec<ZsuiCargoFeature> {
             Shell,
             true,
             Vec::new(),
-            vec!["windows-win32", "macos-appkit", "linux-direct"],
+            vec!["windows-win32", "macos-appkit", "linux-direct-rust-text"],
             "window declarations and target-native Win32, AppKit or lightweight Wayland/X11 host paths",
         ),
         ZsuiCargoFeature::new(
@@ -805,7 +805,15 @@ pub fn zsui_feature_manifest() -> Vec<ZsuiCargoFeature> {
             false,
             vec!["cairo-rs", "pango", "pangocairo"],
             vec!["linux-direct-host"],
-            "lightweight Linux native-window backend with direct software presentation, Pango text, built-in symbolic vectors and XDG portal dialogs",
+            "lightweight Linux native-window backend with direct software presentation, Pango text fallback, built-in symbolic vectors and XDG portal dialogs",
+        ),
+        ZsuiCargoFeature::new(
+            "linux-direct-rust-text",
+            Backend,
+            false,
+            Vec::new(),
+            vec!["linux-direct", "rust-text"],
+            "Linux Direct with the shared ZSUI HarfRust/Swash text engine; the default window umbrella selects this profile",
         ),
         ZsuiCargoFeature::new(
             "linux-direct-lite",
@@ -814,6 +822,14 @@ pub fn zsui_feature_manifest() -> Vec<ZsuiCargoFeature> {
             vec!["tiny-skia"],
             vec!["linux-direct-host", "rust-text"],
             "opt-in pure-Rust Linux renderer using the retained ZSUI text engine and tiny-skia on the shared Wayland/X11 host",
+        ),
+        ZsuiCargoFeature::new(
+            "bundled-ui-font",
+            Profile,
+            false,
+            Vec::new(),
+            Vec::new(),
+            "optional embedded OFL Inter family for deterministic Latin, Greek and Cyrillic text in the shared ZSUI text engine",
         ),
         ZsuiCargoFeature::new(
             "linux-system-icons",
@@ -836,7 +852,7 @@ pub fn zsui_feature_manifest() -> Vec<ZsuiCargoFeature> {
             Profile,
             false,
             Vec::new(),
-            vec!["windows-win32", "macos-appkit", "linux-direct"],
+            vec!["windows-win32", "macos-appkit", "linux-direct-rust-text"],
             "target-native desktop backend profile without exposing platform handles to applications",
         ),
         ZsuiCargoFeature::new(
@@ -949,7 +965,7 @@ mod tests {
             .expect("window feature should be listed");
         assert_eq!(
             window.enables,
-            vec!["windows-win32", "macos-appkit", "linux-direct"]
+            vec!["windows-win32", "macos-appkit", "linux-direct-rust-text"]
         );
     }
 
@@ -1009,6 +1025,20 @@ mod tests {
             .expect("Linux lite text feature should be listed");
         assert_eq!(linux_lite.enables, vec!["linux-direct-host", "rust-text"]);
         assert_eq!(linux_lite.optional_dependency_names, vec!["tiny-skia"]);
+
+        let linux_rust = manifest
+            .iter()
+            .find(|feature| feature.name == "linux-direct-rust-text")
+            .expect("Linux Rust text feature should be listed");
+        assert_eq!(linux_rust.enables, vec!["linux-direct", "rust-text"]);
+        assert!(linux_rust.optional_dependency_names.is_empty());
+
+        let bundled = manifest
+            .iter()
+            .find(|feature| feature.name == "bundled-ui-font")
+            .expect("bundled UI font feature should be listed");
+        assert!(bundled.enables.is_empty());
+        assert!(bundled.optional_dependency_names.is_empty());
     }
 
     #[test]

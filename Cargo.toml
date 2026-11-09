@@ -74,7 +74,7 @@ windows-numerics = { version = "0.3", optional = true }
 [features]
 default = ["window", "button", "label"]
 accessibility = ["dep:windows", "dep:windows-core", "gtk4?/v4_10", "objc2-app-kit?/NSAccessibility", "objc2-app-kit?/NSAccessibilityConstants", "objc2-app-kit?/NSAccessibilityElement"]
-window = ["windows-win32", "macos-appkit", "linux-direct"]
+window = ["windows-win32", "macos-appkit", "linux-direct-rust-text"]
 button = ["widgets-base"]
 accordion = ["button", "label"]
 badge = ["widgets-base"]
@@ -165,6 +165,9 @@ windows-gdi = ["dep:windows-sys", "image"]
 windows-win32 = ["windows-rust-text"]
 windows-directwrite = ["windows-gdi", "dep:windows", "dep:windows-core", "windows/Win32_Graphics_DirectWrite", "windows/Win32_Graphics_Gdi"]
 rust-text = ["dep:cosmic-text", "dep:skrifa", "dep:swash", "dep:ttf-parser"]
+# Optional deterministic UI family for the shared ZSUI text engine. Inter is
+# OFL-1.1; CJK and emoji continue to resolve through system fallback.
+bundled-ui-font = []
 rust-text-proof = ["rust-text"]
 windows-rust-text = ["windows-gdi", "rust-text"]
 windows-font-sharing = ["windows-rust-text"]
@@ -174,9 +177,13 @@ linux-gtk = ["dep:gtk4", "gtk4/v4_10"]
 linux-direct-host = ["dep:dbus", "dep:rfd", "dep:softbuffer", "dep:winit"]
 linux-direct-accessibility = ["accessibility", "linux-direct-host", "dep:accesskit", "dep:accesskit_winit"]
 linux-direct = ["linux-direct-host", "dep:cairo-rs", "dep:pango", "dep:pangocairo"]
+# Linux Direct with the same ZSUI HarfRust/Swash text engine used by Win32.
+# The default `window` umbrella selects this profile; `linux-direct` alone
+# remains the Pango/Cairo fallback for comparison and compatibility builds.
+linux-direct-rust-text = ["linux-direct", "rust-text"]
 linux-direct-lite = ["linux-direct-host", "rust-text", "dep:tiny-skia"]
 linux-system-icons = ["linux-direct", "dep:freedesktop-icons", "dep:gdk-pixbuf"]
-desktop-native = ["windows-win32", "macos-appkit", "linux-direct"]
+desktop-native = ["windows-win32", "macos-appkit", "linux-direct-rust-text"]
 all-widgets = ["button", "accordion", "badge", "split-view", "breadcrumb", "canvas", "flyout", "menu-flyout", "context-menu", "toggle-button", "icon", "label", "grid", "grid-view", "scroll", "list", "virtual-list", "paged-list", "image-preview", "video", "textbox", "password-box", "tooltip", "dialog", "toast", "info-bar", "teaching-tip", "checkbox", "toggle", "slider", "number-box", "radio", "progress", "progress-ring", "auto-suggest", "command-palette", "tree", "combo", "date-picker", "time-picker", "color-picker", "tabs", "table", "shell", "document-shell"]
 full = [
     "clipboard-files",

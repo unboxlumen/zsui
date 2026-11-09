@@ -153,11 +153,7 @@ impl DesktopRuntimeBackend for Backend {
             },
             DesktopNativeSmokeMetadata {
                 proof_backend: "linux_direct",
-                screenshot_backend: if cfg!(feature = "linux-direct") {
-                    "winit_softbuffer_cairo_pango"
-                } else {
-                    crate::linux_direct::LINUX_DIRECT_LITE_CAPTURE_BACKEND
-                },
+                screenshot_backend: crate::linux_direct::capture_backend_name(),
                 missing_capture_error:
                     "the Linux direct event loop exited before the final surface capture",
             },
@@ -182,7 +178,7 @@ impl DesktopRuntimeBackend for Backend {
 
     fn native_proof_typography(&self, typography_scale: f32) -> crate::NativeTypographyProfile {
         crate::NativeTypographyProfile::fallback(
-            crate::ZsTypographyPlatformStyle::Gtk,
+            crate::ZsPlatformStyle::current(),
             typography_scale,
         )
     }

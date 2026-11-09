@@ -103,6 +103,7 @@ pub(crate) fn section_for_style<Msg>(
             column(children)
                 .padding(spacing.lg)
                 .gap(spacing.content_gap)
+                .align(crate::ViewAlign::Stretch)
                 .radius(radius.medium)
                 .bg(crate::ThemeColorToken::SurfaceRaised),
         ])
@@ -932,6 +933,17 @@ mod data_tests {
         ] {
             assert_eq!(section(platform).style.flex, 0.0);
         }
+    }
+
+    #[test]
+    fn fluent_card_stretches_controls_across_the_card_width() {
+        let section = section_for_style::<()>(
+            crate::ZsBaseControlPlatformStyle::Windows,
+            "Appearance",
+            [spacer().height(Dp::new(32.0))],
+        );
+        let body = &section.children[1];
+        assert_eq!(body.style.align, crate::ViewAlign::Stretch);
     }
 
     #[test]

@@ -317,8 +317,9 @@ glyph instead of assigning one locale message font to the whole run; classic
 Segoe UI is the older-system fallback. GDI remains the bounded fallback for
 unsupported ellipsis behavior. Text uses subpixel rasterization while semantic
 icon-font glyphs use grayscale coverage to avoid color fringes.
-AppKit keeps the system `NSFont` family and GTK4 keeps its configured Pango
-system family.
+AppKit keeps the system `NSFont` family, the optional GTK4 host keeps its
+configured Pango family, and Linux Direct resolves the configured host family
+through the shared ZSUI HarfRust/Swash engine.
 
 `src/component_catalog.rs` is the authoritative component readiness inventory.
 It distinguishes first-pass runtime surfaces from contract-only and not-started
@@ -416,9 +417,11 @@ paragraph baseline phase and includes synthetic-bold strength in glyph advances
 and raster-cache identity. These are retained-layout rules, not proof-only
 postprocessing or font-name overrides.
 `macos-appkit` enables optional `objc2` AppKit bindings, `linux-direct` enables
-the lightweight Wayland/X11, Cairo/Pango, built-in symbolic-vector and portal
-stack, while `linux-direct-lite` selects the same host with the optional
-pure-Rust ZSUI retained text engine and tiny-skia renderer. `linux-direct-lite`
+the lightweight Wayland/X11, Cairo, built-in symbolic-vector and portal stack,
+while its default `linux-direct-rust-text` profile uses the shared ZSUI
+retained text engine. The legacy Pango/Cairo text path remains available as the
+compatibility fallback. `linux-direct-lite` selects the same host with the
+optional pure-Rust ZSUI retained text engine and tiny-skia renderer. `linux-direct-lite`
 enables `rust-text` instead of owning a second Cosmic/Swash context. The two
 renderer features are additive in Cargo, so `linux-direct` remains authoritative
 when both are enabled; a lite-only build must omit `linux-direct`. `linux-system-icons`
@@ -654,8 +657,9 @@ return to application authoring or smoke setup.
 
 The shared text-input geometry owns only the `NativeTextShaper` contract, its
 bounded shaped-line cache and the platform-neutral logical-cell fallback.
-Win32 GDI/Uniscribe, AppKit/Core Text, Linux Direct Pango, Linux Direct Lite's
-shared ZSUI text context and GTK Pango construct backend-owned shapers and inject them into
+Win32 GDI/Uniscribe, AppKit/Core Text, Linux Direct and Linux Direct Lite's
+shared ZSUI text context, and GTK Pango construct backend-owned shapers and
+inject them into
 the per-window input runtime. Their contexts, scale queries and shaping calls
 do not appear as variants in the shared input core, so another platform adds a
 shaper implementation without extending a cross-platform enum or matching on

@@ -350,8 +350,9 @@ touch/inertial pointer routing and macOS/Linux target input evidence are still
 pending. Left/Right now traverses platform-shaped primary caret positions in
 visual x order, including Shift selection and soft-wrap boundaries. Shared text-capable
 controls keep navigation, deletion, pointer hits, visual wrapping and IME marked
-selections on Unicode extended-grapheme boundaries; Uniscribe, Core Text and
-Pango provide the proportional advances, visual cluster boxes and primary/secondary
+selections on Unicode extended-grapheme boundaries; Uniscribe, Core Text, the
+ZSUI HarfRust/Swash engine and the Pango compatibility fallback provide the
+proportional advances, visual cluster boxes and primary/secondary
 caret offsets consumed by paint, selection, hit testing, wrap, horizontal reveal
 and candidate-window anchoring.
 TextBox, multiline TextEditor, PasswordBox, NumberBox, AutoSuggestBox, ComboBox

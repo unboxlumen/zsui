@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use cairo::{Context as CairoContext, Format, ImageSurface};
 #[cfg(feature = "linux-system-icons")]
 use gdk_pixbuf::prelude::*;
-#[cfg(feature = "linux-direct")]
+#[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
 use pango::prelude::*;
 use softbuffer::{Context as SoftBufferContext, Surface as SoftBufferSurface};
 use winit::application::ApplicationHandler;
@@ -34,9 +34,13 @@ use crate::native_draw_support::{NativeDrawPalette, NativeDrawTextStyleResolver}
 use crate::NativeIconColorMode;
 #[cfg(feature = "linux-direct")]
 use crate::{
-    Color, HorizontalAlign, NativeDrawCommand, NativeDrawCommandSink, NativeDrawIconCommand,
-    NativeDrawImageCommand, NativeDrawTextCommand, NativeImageInterpolation, NativeStyleResolver,
-    Size as ZsSize, TextLayout, TextRun, TextStyle, TextWeight, TextWrap, VerticalAlign,
+    Color, NativeDrawCommand, NativeDrawCommandSink, NativeDrawIconCommand, NativeDrawImageCommand,
+    NativeDrawTextCommand, NativeImageInterpolation, NativeStyleResolver,
+};
+#[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
+use crate::{
+    HorizontalAlign, Size as ZsSize, TextLayout, TextRun, TextStyle, TextWeight, TextWrap,
+    VerticalAlign,
 };
 use crate::{
     MenuItemSpec, MenuSpec, NativeDrawPlan, Point, Rect, WindowLayer, WindowSpec, WindowSurface,
@@ -76,12 +80,35 @@ fn linux_direct_file_dialog_parent() -> Option<Rc<WinitWindow>> {
 
 pub(crate) const LINUX_DIRECT_LITE_CAPTURE_BACKEND: &str =
     "winit_softbuffer_zsui_rust_text_tiny_skia";
+#[cfg(feature = "linux-direct-lite")]
 pub(crate) const LINUX_DIRECT_LITE_TYPOGRAPHY_SOURCE: &str = "zsui_rust_text_fontdb";
+#[cfg(feature = "linux-direct-lite")]
 pub(crate) const LINUX_DIRECT_LITE_RASTERIZATION: &str =
     "zsui_rust_text_swash_tiny_skia_softbuffer";
+pub(crate) const LINUX_DIRECT_RUST_TEXT_CAPTURE_BACKEND: &str =
+    "winit_softbuffer_zsui_rust_text_cairo";
+pub(crate) const LINUX_DIRECT_RUST_TEXT_RASTERIZATION: &str =
+    "zsui_rust_text_swash_cairo_softbuffer";
 
-#[cfg(feature = "linux-direct")]
+#[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
+pub(crate) const fn capture_backend_name() -> &'static str {
+    "winit_softbuffer_pango_cairo"
+}
+
+#[cfg(feature = "linux-direct-rust-text")]
+pub(crate) const fn capture_backend_name() -> &'static str {
+    LINUX_DIRECT_RUST_TEXT_CAPTURE_BACKEND
+}
+
+#[cfg(all(feature = "linux-direct-lite", not(feature = "linux-direct")))]
+pub(crate) const fn capture_backend_name() -> &'static str {
+    LINUX_DIRECT_LITE_CAPTURE_BACKEND
+}
+
+#[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
 type LinuxDirectTextContext = pango::Context;
+#[cfg(feature = "linux-direct-rust-text")]
+type LinuxDirectTextContext = crate::linux_rust_text::LinuxRustTextSystem;
 #[cfg(all(feature = "linux-direct-lite", not(feature = "linux-direct")))]
 type LinuxDirectTextContext = crate::linux_direct_lite::LinuxLiteTextSystem;
 
@@ -388,16 +415,26 @@ impl LinuxDirectApp {
                 .and_then(Option::take)
                 .unwrap_or_default();
             let text_context = linux_direct_text_context();
-            #[cfg(feature = "linux-direct")]
+            #[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
             let system_scale = linux_direct_ui_font_scale();
+            #[cfg(feature = "linux-direct-rust-text")]
+            let system_scale = text_context.ui_scale();
             #[cfg(all(feature = "linux-direct-lite", not(feature = "linux-direct")))]
             let system_scale = text_context.ui_scale();
             if let Some(updated) = runtime.set_typography_scale(system_scale) {
                 plan = updated;
             }
-            #[cfg(all(feature = "text-input-core", feature = "linux-direct"))]
+            #[cfg(all(
+                feature = "text-input-core",
+                feature = "linux-direct",
+                not(feature = "linux-direct-rust-text")
+            ))]
             runtime
                 .set_text_shaping_backend(linux_direct_text_shaping_backend(text_context.clone()));
+            #[cfg(all(feature = "text-input-core", feature = "linux-direct-rust-text"))]
+            runtime.set_text_shaping_backend(linux_direct_rust_text_shaping_backend(
+                text_context.clone(),
+            ));
             #[cfg(all(
                 feature = "text-input-core",
                 feature = "linux-direct-lite",
@@ -1863,7 +1900,7 @@ impl LinuxDirectWindow {
             rgba,
         )?;
         let logical = self.physical_size.to_logical::<f64>(self.scale_factor);
-        #[cfg(feature = "linux-direct")]
+        #[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
         let backend = {
             #[cfg(feature = "desktop-overlay")]
             {
@@ -1876,6 +1913,21 @@ impl LinuxDirectWindow {
             #[cfg(not(feature = "desktop-overlay"))]
             {
                 "winit_softbuffer_pango_cairo"
+            }
+        };
+        #[cfg(feature = "linux-direct-rust-text")]
+        let backend = {
+            #[cfg(feature = "desktop-overlay")]
+            {
+                if self.overlay.is_some() {
+                    "winit_x11_argb_zsui_rust_text_cairo"
+                } else {
+                    LINUX_DIRECT_RUST_TEXT_CAPTURE_BACKEND
+                }
+            }
+            #[cfg(not(feature = "desktop-overlay"))]
+            {
+                LINUX_DIRECT_RUST_TEXT_CAPTURE_BACKEND
             }
         };
         #[cfg(all(feature = "linux-direct-lite", not(feature = "linux-direct")))]
@@ -2121,7 +2173,7 @@ fn render_linux_direct_frame(
     height: u32,
     scale_factor: f64,
     theme: WinitTheme,
-    pango_context: &pango::Context,
+    text_context: &LinuxDirectTextContext,
     icon_cache: &mut HashMap<(ZsIcon, u32, Option<u32>), LinuxIconRaster>,
     transparent: bool,
 ) -> Result<(), String> {
@@ -2176,7 +2228,9 @@ fn render_linux_direct_frame(
             .map_err(|error| format!("could not clear Cairo image surface: {error}"))?;
     }
     context.scale(scale_factor, scale_factor);
-    let draw_context = pango_context.clone();
+    #[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
+    let draw_context = text_context.clone();
+    #[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
     pangocairo::functions::update_context(&context, &draw_context);
     if let Some(menu) = menu_surface {
         context
@@ -2191,11 +2245,12 @@ fn render_linux_direct_frame(
         );
         context.clip();
         context.translate(0.0, f64::from(content_offset));
+        #[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
         pangocairo::functions::update_context(&context, &draw_context);
     }
     let mut sink = LinuxDirectDrawSink::new(
         &context,
-        draw_context.clone(),
+        text_context.clone(),
         palette,
         plan.typography_scale(),
         scale_factor,
@@ -2209,10 +2264,22 @@ fn render_linux_direct_frame(
             .map_err(|error| format!("could not restore Cairo menu state: {error}"))?;
     }
     if let Some(menu) = menu_surface {
-        pangocairo::functions::update_context(&context, &draw_context);
-        let mut canvas =
-            crate::linux_direct_menu::LinuxCairoMenuCanvas::new(&context, &draw_context);
-        menu.draw(&mut canvas, palette);
+        #[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
+        {
+            pangocairo::functions::update_context(&context, &draw_context);
+            let mut canvas =
+                crate::linux_direct_menu::LinuxCairoMenuCanvas::new(&context, &draw_context);
+            menu.draw(&mut canvas, palette);
+        }
+        #[cfg(feature = "linux-direct-rust-text")]
+        {
+            let mut canvas = crate::linux_direct_menu::LinuxCairoRustMenuCanvas::new(
+                &context,
+                text_context,
+                scale_factor as f32,
+            );
+            menu.draw(&mut canvas, palette);
+        }
     }
     drop(context);
     image.flush();
@@ -2220,12 +2287,12 @@ fn render_linux_direct_frame(
     Ok(())
 }
 
-#[cfg(feature = "linux-direct")]
+#[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
 struct LinuxDirectTextLayout {
     context: pango::Context,
 }
 
-#[cfg(feature = "linux-direct")]
+#[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
 impl LinuxDirectTextLayout {
     fn new(context: pango::Context) -> Self {
         Self { context }
@@ -2238,7 +2305,7 @@ impl LinuxDirectTextLayout {
     }
 }
 
-#[cfg(feature = "linux-direct")]
+#[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
 impl TextLayout for LinuxDirectTextLayout {
     fn measure(&self, text: &str, style: &TextStyle, max_width: i32) -> ZsSize {
         if text.is_empty() {
@@ -2278,7 +2345,10 @@ struct LinuxDirectDrawSink<'a> {
     context: &'a CairoContext,
     palette: NativeDrawPalette,
     style_resolver: NativeDrawTextStyleResolver,
+    #[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
     text_layout: LinuxDirectTextLayout,
+    #[cfg(feature = "linux-direct-rust-text")]
+    text_system: crate::linux_rust_text::LinuxRustTextSystem,
     scale_factor: f64,
     icon_cache: &'a mut HashMap<(ZsIcon, u32, Option<u32>), LinuxIconRaster>,
     clip_depth: usize,
@@ -2288,7 +2358,7 @@ struct LinuxDirectDrawSink<'a> {
 impl<'a> LinuxDirectDrawSink<'a> {
     fn new(
         context: &'a CairoContext,
-        pango_context: pango::Context,
+        text_context: LinuxDirectTextContext,
         palette: NativeDrawPalette,
         typography_scale: f32,
         scale_factor: f64,
@@ -2298,10 +2368,13 @@ impl<'a> LinuxDirectDrawSink<'a> {
             context,
             palette,
             style_resolver: NativeDrawTextStyleResolver::from_profile(
-                linux_direct_native_typography_profile(typography_scale, Some(&pango_context)),
+                linux_direct_native_typography_profile(typography_scale, Some(&text_context)),
                 palette,
             ),
-            text_layout: LinuxDirectTextLayout::new(pango_context),
+            #[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
+            text_layout: LinuxDirectTextLayout::new(text_context),
+            #[cfg(feature = "linux-direct-rust-text")]
+            text_system: text_context,
             scale_factor,
             icon_cache,
             clip_depth: 0,
@@ -2365,6 +2438,7 @@ impl<'a> LinuxDirectDrawSink<'a> {
         self.context.close_path();
     }
 
+    #[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
     fn draw_text(&self, command: &NativeDrawTextCommand) {
         let mut style = self.style_resolver.resolve_text_style(command.style);
         if let Some(color) = command.color_override(self.palette.high_contrast) {
@@ -2403,6 +2477,53 @@ impl<'a> LinuxDirectDrawSink<'a> {
         self.set_source(style.color);
         self.context.move_to(f64::from(x), f64::from(y));
         pangocairo::functions::show_layout(self.context, &layout);
+        let _ = self.context.restore();
+    }
+
+    #[cfg(feature = "linux-direct-rust-text")]
+    fn draw_text(&self, command: &NativeDrawTextCommand) {
+        let mut style = self.style_resolver.resolve_text_style(command.style);
+        if let Some(color) = command.color_override(self.palette.high_contrast) {
+            style.color = color;
+        }
+        command.apply_size_override(&mut style);
+        let Some(raster) = self.text_system.rasterize(
+            &command.text,
+            &style,
+            command.bounds,
+            self.scale_factor as f32,
+            0,
+        ) else {
+            return;
+        };
+        let width = raster.width;
+        let height = raster.height;
+        let stride = raster.stride;
+        let x = f64::from(raster.x);
+        let y = f64::from(raster.y);
+        let Ok(surface) = ImageSurface::create_for_data(
+            raster.pixels,
+            Format::ARgb32,
+            width as i32,
+            height as i32,
+            stride as i32,
+        ) else {
+            return;
+        };
+        if self.context.save().is_err() {
+            return;
+        }
+        self.add_rect(command.bounds);
+        self.context.clip();
+        let (device_x, device_y) = self.context.user_to_device(x, y);
+        self.context.identity_matrix();
+        if self
+            .context
+            .set_source_surface(&surface, device_x, device_y)
+            .is_ok()
+        {
+            let _ = self.context.paint();
+        }
         let _ = self.context.restore();
     }
 
@@ -2787,12 +2908,12 @@ pub(crate) fn linux_direct_configured_font_name() -> &'static str {
     })
 }
 
-#[cfg(feature = "linux-direct")]
+#[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
 fn linux_direct_font_description() -> pango::FontDescription {
     pango::FontDescription::from_string(linux_direct_configured_font_name())
 }
 
-#[cfg(feature = "linux-direct")]
+#[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
 fn linux_direct_ui_font_family() -> String {
     linux_direct_font_description()
         .family()
@@ -2801,7 +2922,7 @@ fn linux_direct_ui_font_family() -> String {
         .unwrap_or_else(|| "Sans".to_string())
 }
 
-#[cfg(feature = "linux-direct")]
+#[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
 pub(crate) fn linux_direct_ui_font_scale() -> f32 {
     let description = linux_direct_font_description();
     let size = description.size();
@@ -2816,12 +2937,21 @@ pub(crate) fn linux_direct_ui_font_scale() -> f32 {
     (logical_pixels / 14.0).clamp(0.75, 3.0)
 }
 
-#[cfg(feature = "linux-direct")]
+#[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
 fn linux_direct_text_context() -> LinuxDirectTextContext {
     pangocairo::FontMap::default().create_context()
 }
 
-#[cfg(all(feature = "text-input-core", feature = "linux-direct"))]
+#[cfg(feature = "linux-direct-rust-text")]
+fn linux_direct_text_context() -> LinuxDirectTextContext {
+    crate::linux_rust_text::LinuxRustTextSystem::new(linux_direct_configured_font_name())
+}
+
+#[cfg(all(
+    feature = "text-input-core",
+    feature = "linux-direct",
+    not(feature = "linux-direct-rust-text")
+))]
 fn linux_direct_text_shaping_backend(
     context: pango::Context,
 ) -> crate::native_input_visuals::NativeTextShapingBackend {
@@ -2831,13 +2961,21 @@ fn linux_direct_text_shaping_backend(
     })
 }
 
-#[cfg(all(feature = "text-input-core", feature = "linux-direct"))]
+#[cfg(all(
+    feature = "text-input-core",
+    feature = "linux-direct",
+    not(feature = "linux-direct-rust-text")
+))]
 struct LinuxDirectPangoTextShaper {
     scale: std::sync::Mutex<f32>,
     context: pango::Context,
 }
 
-#[cfg(all(feature = "text-input-core", feature = "linux-direct"))]
+#[cfg(all(
+    feature = "text-input-core",
+    feature = "linux-direct",
+    not(feature = "linux-direct-rust-text")
+))]
 impl crate::native_input_visuals::NativeTextShaper for LinuxDirectPangoTextShaper {
     fn set_context(&self, _dpi: crate::Dpi, scale: f32) {
         *self
@@ -2875,6 +3013,67 @@ impl crate::native_input_visuals::NativeTextShaper for LinuxDirectPangoTextShape
 
     fn shape_line(&self, text: &str) -> Option<crate::native_input_visuals::NativeShapedTextLine> {
         shape_linux_direct_text_line_at_scale(&self.context, text, self.typography_scale())
+    }
+}
+
+#[cfg(all(feature = "text-input-core", feature = "linux-direct-rust-text"))]
+fn linux_direct_rust_text_shaping_backend(
+    system: crate::linux_rust_text::LinuxRustTextSystem,
+) -> crate::native_input_visuals::NativeTextShapingBackend {
+    crate::native_input_visuals::NativeTextShapingBackend::platform(LinuxDirectRustTextShaper {
+        system,
+        scale: std::sync::Mutex::new(1.0),
+    })
+}
+
+#[cfg(all(feature = "text-input-core", feature = "linux-direct-rust-text"))]
+struct LinuxDirectRustTextShaper {
+    scale: std::sync::Mutex<f32>,
+    system: crate::linux_rust_text::LinuxRustTextSystem,
+}
+
+#[cfg(all(feature = "text-input-core", feature = "linux-direct-rust-text"))]
+impl crate::native_input_visuals::NativeTextShaper for LinuxDirectRustTextShaper {
+    fn set_context(&self, _dpi: crate::Dpi, scale: f32) {
+        *self
+            .scale
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = scale;
+    }
+
+    fn debug_name(&self) -> &'static str {
+        "LinuxDirect(ZsuiRustText)"
+    }
+
+    fn typography_scale(&self) -> f32 {
+        *self
+            .scale
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn measure(
+        &self,
+        text: &str,
+        semantic: crate::SemanticTextStyle,
+        max_width: i32,
+        _dpi: crate::Dpi,
+        typography_scale: f32,
+    ) -> Option<crate::Size> {
+        let resolver = NativeDrawTextStyleResolver::from_profile(
+            self.system
+                .typography_profile(typography_scale, LINUX_DIRECT_RUST_TEXT_RASTERIZATION),
+            NativeDrawPalette::for_mode(crate::ZsuiThemeMode::Light, false),
+        );
+        let style = crate::NativeStyleResolver::resolve_text_style(&resolver, semantic);
+        Some(
+            self.system
+                .measure(text, &style, (max_width > 0).then_some(max_width as f32)),
+        )
+    }
+
+    fn shape_line(&self, text: &str) -> Option<crate::native_input_visuals::NativeShapedTextLine> {
+        self.system.shape_line(text, self.typography_scale())
     }
 }
 
@@ -2959,14 +3158,14 @@ impl crate::native_input_visuals::NativeTextShaper for LinuxDirectLiteTextShaper
     }
 }
 
-#[cfg(feature = "linux-direct")]
+#[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
 fn linux_direct_native_typography_profile(
     typography_scale: f32,
     context: Option<&pango::Context>,
 ) -> crate::NativeTypographyProfile {
     let font_family = linux_direct_ui_font_family();
     let mut profile = crate::NativeTypographyProfile::new(
-        crate::ZsTypographyPlatformStyle::Gtk,
+        crate::ZsPlatformStyle::current(),
         "fontconfig_pango_context",
         font_family.clone(),
         "Monospace",
@@ -2988,14 +3187,40 @@ fn linux_direct_native_typography_profile(
     profile
 }
 
-#[cfg(all(feature = "text-input-core", feature = "linux-direct"))]
+#[cfg(feature = "linux-direct-rust-text")]
+fn linux_direct_native_typography_profile(
+    typography_scale: f32,
+    text_system: Option<&crate::linux_rust_text::LinuxRustTextSystem>,
+) -> crate::NativeTypographyProfile {
+    text_system.map_or_else(
+        || {
+            crate::NativeTypographyProfile::fallback(
+                crate::ZsPlatformStyle::current(),
+                typography_scale,
+            )
+        },
+        |text_system| {
+            text_system.typography_profile(typography_scale, LINUX_DIRECT_RUST_TEXT_RASTERIZATION)
+        },
+    )
+}
+
+#[cfg(all(
+    feature = "text-input-core",
+    feature = "linux-direct",
+    not(feature = "linux-direct-rust-text")
+))]
 pub(crate) fn shape_linux_direct_text_line(
     context: &pango::Context,
     text: &str,
 ) -> Option<crate::native_input_visuals::NativeShapedTextLine> {
     shape_linux_direct_text_line_at_scale(context, text, linux_direct_ui_font_scale())
 }
-#[cfg(all(feature = "text-input-core", feature = "linux-direct"))]
+#[cfg(all(
+    feature = "text-input-core",
+    feature = "linux-direct",
+    not(feature = "linux-direct-rust-text")
+))]
 fn shape_linux_direct_text_line_at_scale(
     context: &pango::Context,
     text: &str,
@@ -3008,7 +3233,7 @@ fn shape_linux_direct_text_line_at_scale(
     if text.is_empty() {
         return None;
     }
-    let body = crate::TextRole::Body.metrics_for(crate::ZsTypographyPlatformStyle::Gtk);
+    let body = crate::TextRole::Body.metrics_for(crate::ZsPlatformStyle::current());
     let mut style = TextStyle::line(
         linux_direct_ui_font_family(),
         body.size * typography_scale,
@@ -3053,7 +3278,11 @@ fn shape_linux_direct_text_line_at_scale(
     NativeShapedTextLine::new(width, clusters, carets)
 }
 
-#[cfg(all(feature = "text-input-core", feature = "linux-direct"))]
+#[cfg(all(
+    feature = "text-input-core",
+    feature = "linux-direct",
+    not(feature = "linux-direct-rust-text")
+))]
 fn linux_pango_coordinate(value: i32) -> i32 {
     if value >= 0 {
         value.saturating_add(pango::SCALE / 2) / pango::SCALE
@@ -3062,7 +3291,7 @@ fn linux_pango_coordinate(value: i32) -> i32 {
     }
 }
 
-#[cfg(feature = "linux-direct")]
+#[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
 fn configure_linux_pango_layout(
     layout: &pango::Layout,
     text: &str,
@@ -3342,7 +3571,7 @@ mod tests {
         assert!(!focus_transition_lost(&mut focused, false));
     }
 
-    #[cfg(feature = "linux-direct")]
+    #[cfg(all(feature = "linux-direct", not(feature = "linux-direct-rust-text")))]
     #[test]
     fn direct_pango_no_wrap_does_not_constrain_width() {
         let context = linux_direct_text_context();

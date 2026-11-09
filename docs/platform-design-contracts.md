@@ -1,6 +1,6 @@
 # ZSUI 平台视觉契约
 
-ZSUI 保留一棵共享的自绘 View 树，但不把 Windows 的组件组合复制到其他桌面。平台差异由框架的组合原语、语义颜色、控件度量和后端字体/缩放解析共同决定。
+ZSUI 保留一棵共享的自绘 View 树。Windows 与默认的 Linux Direct 宿主共用 Windows/Fluent 的组合、度量和选中态契约；macOS 使用 AppKit 契约；可选的 GTK4 兼容宿主保留 GTK/Adwaita 契约。平台差异由框架的组合原语、语义颜色、控件度量和后端字体/缩放解析共同决定。
 
 ## Windows / WinUI
 
@@ -85,7 +85,9 @@ Demo 中另写 14/20 的 Windows 字体常量。`TextWeight::Automatic` 使用�
 样式的默认字重；应用显式指定的 Regular、Medium、Semibold 或 Bold 不得被平台
 解析器覆盖。
 
-## Linux / GTK4 + Libadwaita
+## Linux / GTK4 + Libadwaita（可选兼容宿主）
+
+> 默认的 `linux-direct` 宿主使用上文的 Windows / WinUI 契约；本节只约束显式启用的 `linux-gtk` 兼容宿主。
 
 实现依据：
 
@@ -120,7 +122,8 @@ GTK 的 HIG 同样没有承诺所有主题都使用同一像素高度。ZSUI 只
 ## 文字完整性
 
 - 单行控件使用平台语义行高和尾部省略号；省略必须是明确的窄宽度降级，不得由错误的固定高度或估算宽度触发。
-- 可换行标签不固定为单行高度；共享 View 树保留显式段落行，最终换行、塑形和测量分别由 DirectWrite/GDI、Core Text/AppKit 与 Pango 完成。
+- 可换行标签不固定为单行高度；共享 View 树保留显式段落行，最终换行、塑形和测量在 Windows 与默认 Linux Direct 上由同一套 ZSUI HarfRust/Swash 引擎完成，AppKit 使用 Core Text，Linux 的 Pango 路径仅作为兼容回退。
+- 可选的 `bundled-ui-font` 以内置 Inter（OFL-1.1）固定拉丁/希腊/西里尔 UI 字形；CJK、emoji 和复杂脚本仍按宿主字体回退，不能把内置拉丁字体当成全局字体。
 - AppKit 的 preferred body font 与 GTK 的 `gtk-font-name` 在宿主启动时产生同一份运行时字体比例；该比例同时进入 View 布局、DrawPlan、平台塑形、编辑器可视行、选区和光标，不允许绘制字号与布局行高各用一套值。
 - 按钮最小宽度必须包含 Unicode 全宽字符、组合字符和平台塑形余量；父布局不得把控件压到其文本最小宽度以下。
 - Stack 与 Grid 的固有尺寸递归包含子节点行框、控件最小尺寸、间距和两侧内边距；直接父容器不需要重复声明高度。横向 Stack 按子节点实际获得的宽度计算换行高度，Grid 按实际列宽计算行高。页面和页签面板超过视口时进入垂直滚动，页签条和后续兄弟节点不得被内容覆盖，也不缩小文字或控件硬约束。

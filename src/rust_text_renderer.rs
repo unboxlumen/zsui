@@ -837,6 +837,30 @@ impl ZsRustTextEngine {
         }
     }
 
+    /// Loads a bundled face and makes it authoritative for `family`.
+    ///
+    /// System faces with the same family are removed, so a host that happens to
+    /// ship its own Inter (or another preferred family) cannot silently replace
+    /// the deterministic bundled pixels. Used by `bundled-ui-font`.
+    pub fn with_preferred_font(mut self, family: &str, data: Vec<u8>) -> Self {
+        let replaced = self
+            .font_system
+            .db()
+            .faces()
+            .filter(|face| {
+                face.families
+                    .iter()
+                    .any(|(candidate, _)| candidate == family)
+            })
+            .map(|face| face.id)
+            .collect::<Vec<_>>();
+        self.font_system.db_mut().load_font_data(data);
+        for id in replaced {
+            self.font_system.db_mut().remove_face(id);
+        }
+        self
+    }
+
     pub fn with_glyph_cache_limit(mut self, limit: usize) -> Self {
         self.glyph_cache_limit = limit.max(1);
         self.enforce_glyph_cache_limits();

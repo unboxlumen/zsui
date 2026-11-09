@@ -39,11 +39,12 @@ framework architecture.
   keyboard navigation and pointer drag selection. The shared runtime keeps
   those scalar indices on Unicode extended-grapheme boundaries, so combining
   sequences and joined emoji move, delete, wrap and hit-test as one unit.
-- Win32 Uniscribe, AppKit Core Text and Linux Pango shape each visual line. Their
-  proportional advances, RTL cluster boxes and primary/secondary caret positions feed
-  the shared selection, hit, wrap, horizontal/vertical navigation and viewport
-  geometry. Left/Right follows primary caret x order without exposing bidi run
-  state to application code.
+- Win32 and the default Linux Direct profile share the ZSUI HarfRust/Swash
+  engine; AppKit uses Core Text; Linux Pango remains the compatibility fallback.
+  Their proportional advances, RTL cluster boxes and primary/secondary caret
+  positions feed the shared selection, hit, wrap, horizontal/vertical
+  navigation and viewport geometry. Left/Right follows primary caret x order
+  without exposing bidi run state to application code.
 - `AppCx::text_edit_command(...)` and `text_edit_command_for(...)` queue
   strongly typed `ZsTextEditCommand` requests for the focused or explicitly
   identified editor. The host owns a bounded undo history and returns edits
@@ -201,8 +202,10 @@ Lite adopted the shared bounded ZSUI text context, recorded:
 That historical pure-Rust renderer reduced median RSS by 9.55 MiB (37.7%)
 against the established ZSUI Linux renderer in that fixed workload. These are
 not current-commit measurements and must be rerun after the text-context
-unification; they are not constants for every distribution, font set or display
-server. Native UI Proof run `29677560805` separately launched its former real X11
+unification; the current default Cairo profile now uses the shared ZSUI
+HarfRust/Swash engine rather than Pango. They are not constants for every
+distribution, font set or display server. Native UI Proof run `29677560805`
+separately launched its former real X11
 window, captured the final Softbuffer surface and reported Ubuntu Sans 11,
 zero runtime errors and zero unhandled commands.
 

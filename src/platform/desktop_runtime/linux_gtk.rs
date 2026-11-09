@@ -106,7 +106,7 @@ impl DesktopRuntimeBackend for Backend {
 
     fn native_proof_typography(&self, typography_scale: f32) -> crate::NativeTypographyProfile {
         crate::NativeTypographyProfile::fallback(
-            crate::ZsTypographyPlatformStyle::Gtk,
+            crate::ZsPlatformStyle::current(),
             typography_scale,
         )
     }

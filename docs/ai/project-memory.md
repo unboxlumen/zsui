@@ -74,7 +74,9 @@ history remain authoritative for implementation status.
   uses the ZSUI HarfRust/Swash engine and the installed Segoe UI Variable Small,
   Text and Display optical families; CJK and complex scripts resolve through
   per-glyph system-font fallback, with classic Segoe UI for older systems.
-  AppKit and GTK similarly resolve their host system families. `text` and
+  The default Linux Direct host uses the same ZSUI engine with the configured
+  host family (or the optional bundled Inter family); AppKit and the optional
+  GTK compatibility host resolve their host system families. `text` and
   `styled_text` keep Demo code on semantic `TextRole` values, while the shared
   `resolve_semantic_text_style` path supplies the same family, metrics,
   weight and layout flags to every native renderer.
@@ -694,21 +696,35 @@ history remain authoritative for implementation status.
   target OS; executable size or Runner-wide memory is not runtime evidence.
 - Ubuntu Native Proof must configure the Ubuntu 24.04 desktop font
   (`Ubuntu Sans 11`). A generic headless `Sans` fallback is not acceptable
-  evidence of Ubuntu-native typography.
+  evidence of Ubuntu-native typography. The optional `bundled-ui-font` feature
+  deliberately replaces the UI family with the embedded Inter face; that
+  profile must be identified as bundled evidence rather than Ubuntu-native
+  typography.
 - The default Linux backend is `linux-direct`: a real Wayland/X11 window,
-  direct software presentation, Cairo/Pango text and geometry, built-in Cairo
+  direct software presentation, Cairo drawing with the shared ZSUI
+  HarfRust/Swash text engine (`linux-direct-rust-text`), built-in Cairo
   symbolic icons, native IME events, system clipboard, XDG portal dialogs and
-  an owned desktop menu surface. Exact freedesktop theme lookup and GdkPixbuf
-  decoding are isolated behind `linux-system-icons`. With the optional
-  `accessibility` feature, the
+  an owned desktop menu surface. The same text engine drives
+  `linux-direct-lite` over tiny-skia; `linux-direct` without the Rust-text
+  feature keeps the Pango/Cairo text fallback. Exact freedesktop theme lookup
+  and GdkPixbuf decoding are isolated behind `linux-system-icons`. With the
+  optional `accessibility` feature, the
   shared hit-target tree is projected through AccessKit to AT-SPI with stable
   author IDs, roles, bounds, labels, focus and supported actions. Accessibility
   remains optional and does not increase the default lightweight build.
-  Its controls are ZSUI self-drawn controls adapted to the Linux platform
-  profile; they are not GTK widget instances. This is native-window/system
-  integration, not a claim that the control tree is toolkit-native GTK.
-  `linux-gtk` remains an explicit compatibility backend and is not pulled into
-  the default application. Winit is not evidence of AppKit completion.
+  Its controls are ZSUI self-drawn controls that use the shared Fluent
+  component profile (the same metrics, colors, selection pattern and card
+  composition as Win32); they are not GTK widget instances. This is
+  native-window/system integration, not a claim that the control tree is
+  toolkit-native GTK. `linux-gtk` remains an explicit compatibility backend,
+  keeps the GTK/Adwaita component profile, and is not pulled into the default
+  application. Winit is not evidence of AppKit completion.
+- `bundled-ui-font` is an optional, non-default profile for deterministic
+  Latin/Greek/Cyrillic UI text. It embeds the OFL-1.1 Inter variable face in
+  `assets/fonts/` and makes that family authoritative in the shared text
+  engine even when the host ships another Inter. CJK, emoji, bidi and complex
+  scripts still resolve through host fallback; bundling a full CJK family is
+  not part of the default build.
 - `linux-direct-lite` is the opt-in pure-Rust renderer experiment over the same
   `linux-direct-host` lifecycle, Wayland/X11, IME, menu, portal and AccessKit
   paths. It enables the feature-gated retained ZSUI text engine plus tiny-skia
@@ -776,13 +792,15 @@ history remain authoritative for implementation status.
   sources. Licensed vector assets are fallbacks, not private font code points.
 - Reusable settings composition means navigation, grouped cards, setting rows,
   explanatory text and action regions—not a product-specific settings page.
-- Follow modern Fluent/WinUI proportions on Windows while allowing AppKit and
-  the Linux platform profile to present native platform character.
+- Follow modern Fluent/WinUI proportions on Windows and the default Linux
+  Direct host. AppKit keeps native macOS character, and the optional
+  `linux-gtk` compatibility host keeps GTK/Adwaita character.
 - Platform-native character includes composition, not only control sizes:
-  Windows may use Fluent navigation and card groups, macOS uses a source-list
-  sidebar with aligned AppKit-style form stacks, and GTK uses sidebar
-  navigation with headings outside Adwaita-style boxed groups. Shared state and
-  typed messages do not require all three platforms to reuse a WinUI page tree.
+  Windows and Linux Direct use Fluent navigation and card groups, macOS uses a
+  source-list sidebar with aligned AppKit-style form stacks, and the optional
+  GTK host uses sidebar navigation with headings outside Adwaita-style boxed
+  groups. Shared state and typed messages do not require every target to reuse
+  the same page tree; Linux Direct intentionally shares the Win32 composition.
 - A platform profile is not valid if it only changes colors, radii, spacing or
   font metrics while retaining the WinUI component tree. Navigation selection,
   row grouping, toolbar/header-bar placement, tab treatment, dialog action
@@ -909,11 +927,12 @@ history remain authoritative for implementation status.
   rules before the example consumes them. Measure, paint, hit testing,
   caret/selection geometry and accessibility must share one backend text-layout
   result; demo-local fixes do not advance the unified-platform goal.
-- GTK/Adwaita boxed sections use padded rows with one-pixel separators, and
-  the row's outer minimum height must include its interior padding. GTK sidebar
-  selection stays neutral (not accent-filled), matching the
-  `navigation-sidebar` style contract; accent remains available for actionable
-  controls.
+- For the optional `linux-gtk` compatibility host, GTK/Adwaita boxed sections
+  use padded rows with one-pixel separators, and the row's outer minimum height
+  must include its interior padding. That host keeps neutral (not
+  accent-filled) sidebar selection, matching the `navigation-sidebar` style
+  contract. Linux Direct uses the shared Fluent card and accent-selection
+  contract instead.
 - Command bars use `command_bar(ZsCommandBarSpec)` and `toolbar_button`.
   Every declared bar action remains visible; overflow/menu projection is a
   separate capability and must not be simulated by silently dropping actions.

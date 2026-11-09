@@ -25,11 +25,25 @@ pub(crate) struct LinuxLiteTextSystem {
 
 impl LinuxLiteTextSystem {
     pub(crate) fn new(configured_font: &str) -> Self {
-        let (family, logical_pixels) = parse_configured_font(configured_font);
+        // Match the Linux Direct Fluent profile's Windows 14/20 type scale.
+        let (configured_family, _logical_pixels) = parse_configured_font(configured_font);
+        #[cfg(feature = "bundled-ui-font")]
+        let (family, engine) = {
+            let _ = configured_family;
+            (
+                crate::bundled_font::FAMILY.to_string(),
+                ZsRustTextEngine::new().with_preferred_font(
+                    crate::bundled_font::FAMILY,
+                    crate::bundled_font::DATA.to_vec(),
+                ),
+            )
+        };
+        #[cfg(not(feature = "bundled-ui-font"))]
+        let (family, engine) = (configured_family, ZsRustTextEngine::new());
         Self {
-            inner: Arc::new(Mutex::new(ZsRustTextEngine::new())),
+            inner: Arc::new(Mutex::new(engine)),
             ui_family: Arc::from(family),
-            ui_scale: (logical_pixels / 14.0).clamp(0.75, 3.0),
+            ui_scale: 1.0,
         }
     }
 
@@ -745,7 +759,7 @@ pub(crate) fn linux_lite_typography_profile(
 ) -> crate::NativeTypographyProfile {
     let family = text_system.ui_family().to_string();
     let mut profile = crate::NativeTypographyProfile::new(
-        crate::ZsTypographyPlatformStyle::Gtk,
+        crate::ZsPlatformStyle::current(),
         crate::linux_direct::LINUX_DIRECT_LITE_TYPOGRAPHY_SOURCE,
         family.clone(),
         "Monospace",
@@ -753,7 +767,11 @@ pub(crate) fn linux_lite_typography_profile(
         typography_scale,
         crate::linux_direct::LINUX_DIRECT_LITE_RASTERIZATION,
     )
-    .with_configured_ui_font(crate::linux_direct::linux_direct_configured_font_name());
+    .with_configured_ui_font(if cfg!(feature = "bundled-ui-font") {
+        "Inter (bundled)"
+    } else {
+        crate::linux_direct::linux_direct_configured_font_name()
+    });
     let body = profile.body_metrics;
     let style = TextStyle {
         font_family: profile.ui_font_family.clone(),
@@ -795,7 +813,7 @@ pub(crate) fn shape_linux_lite_text_line_at_scale(
     if text.is_empty() {
         return None;
     }
-    let body = crate::TextRole::Body.metrics_for(crate::ZsTypographyPlatformStyle::Gtk);
+    let body = crate::TextRole::Body.metrics_for(crate::ZsPlatformStyle::current());
     let mut style = TextStyle::line(
         text_system.ui_family().to_string(),
         body.size * typography_scale,

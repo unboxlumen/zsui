@@ -1638,7 +1638,7 @@ fn shape_linux_gtk_text_line_at_scale(
     if text.is_empty() {
         return None;
     }
-    let body = crate::TextRole::Body.metrics_for(crate::ZsTypographyPlatformStyle::Gtk);
+    let body = crate::TextRole::Body.metrics_for(crate::ZsPlatformStyle::current());
     let mut style = TextStyle::line(
         linux_gtk_ui_font_family(),
         body.size * typography_scale,
@@ -2149,7 +2149,7 @@ fn linux_gtk_native_typography_profile(
         .filter(|family| !family.trim().is_empty())
         .unwrap_or_else(|| "Adwaita Sans".to_string());
     let mut profile = crate::NativeTypographyProfile::new(
-        crate::ZsTypographyPlatformStyle::Gtk,
+        crate::ZsPlatformStyle::current(),
         "gtk_settings_pango_context",
         font_family.clone(),
         "Monospace",

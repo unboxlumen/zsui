@@ -40,6 +40,9 @@ impl PlatformExperience {
             },
             NativeUiPlatform::Linux => Self {
                 platform,
+                // The Linux platform keeps its GTK/Adwaita profile for the
+                // optional compatibility host. The default Direct host selects
+                // the shared Fluent profile in `current()`.
                 design_language: PlatformDesignLanguage::Gtk,
                 backend: BackendProfile::linux(),
                 backend_status: NativeUiBackendStatus::NativeHostIntegrated,
@@ -61,6 +64,15 @@ impl PlatformExperience {
             None => return None,
         };
         let experience = Self::for_platform(platform);
+        #[cfg(all(
+            target_os = "linux",
+            not(target_env = "ohos"),
+            feature = "linux-direct-host"
+        ))]
+        let experience = Self {
+            design_language: PlatformDesignLanguage::Fluent,
+            ..experience
+        };
         #[cfg(all(
             target_os = "linux",
             not(target_env = "ohos"),
@@ -236,6 +248,33 @@ mod tests {
         assert_eq!(
             PlatformExperience::for_platform(NativeUiPlatform::Android).shared_component_style(),
             None
+        );
+    }
+
+    #[cfg(all(
+        target_os = "linux",
+        not(target_env = "ohos"),
+        feature = "linux-direct-host"
+    ))]
+    #[test]
+    fn linux_direct_uses_the_shared_fluent_component_profile() {
+        assert_eq!(
+            PlatformExperience::current().and_then(PlatformExperience::shared_component_style),
+            Some(ZsPlatformStyle::Windows)
+        );
+    }
+
+    #[cfg(all(
+        target_os = "linux",
+        not(target_env = "ohos"),
+        feature = "linux-gtk",
+        not(feature = "linux-direct-host")
+    ))]
+    #[test]
+    fn linux_gtk_compatibility_host_keeps_the_gtk_component_profile() {
+        assert_eq!(
+            PlatformExperience::current().and_then(PlatformExperience::shared_component_style),
+            Some(ZsPlatformStyle::Gtk)
         );
     }
 
