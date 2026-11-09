@@ -858,3 +858,43 @@ cargo run --example native_smoke_review -- windows
 The Windows review should report `target_smoke_complete=true` after the run
 because all six required artifacts, including `window.png`, are generated and
 validated.
+
+## Desktop overlay smoke
+
+The desktop-pet example exercises the overlay contract without platform `cfg`:
+
+```powershell
+cargo run --example desktop_pet --features "window,canvas,desktop-overlay"
+```
+
+Its X11/XWayland smoke mode writes a final PNG and a `NativeWindowSmokeRunReport`
+that contains `native_overlay` evidence:
+
+```powershell
+cargo run --example desktop_pet --features "window,canvas,desktop-overlay,native-smoke" -- --smoke target/desktop-pet-proof
+```
+
+The report records the X11 window depth, alpha and opaque pixel counts, the
+number of XShape input rectangles, the physical window position and the monitor
+work area. `screenshot_captured=true` plus a non-empty `native_overlay` block is
+the accepted Linux X11 overlay smoke. CI runs it under Xvfb with 32-bit visuals:
+
+```powershell
+xvfb-run -a --server-args="-screen 0 1280x1024x24+32" ./target/release/examples/desktop_pet --smoke target/desktop-pet-proof
+```
+
+On Linux X11 or XWayland, `xwininfo -id <window> -stats` must report depth 32,
+the requested logical position and `Override Redirect State: no` for the
+activating example. The transparent pixels use an XShape input region derived
+from the same ARGB frame; `PassThrough` is available for whole-window
+click-through.
+
+With `linux-wayland-layer` enabled and a compositor exposing
+`zwlr_layer_shell_v1`, the same example runs as an overlay-only layer surface
+with ARGB8888 `wl_shm` buffers and `wl_surface.set_input_region`. Compositors
+without the protocol fall back to XWayland. IME, menus, dialogs and accessibility
+are outside that overlay-only backend in its first revision.
+
+Win32 and AppKit overlay backends build against the same public contract, but
+their target interaction proof remains external validation work in this
+revision. Cross-compilation alone is not target evidence.

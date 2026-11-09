@@ -15,15 +15,18 @@ backend owns HWNDs, COM apartments, message dispatch and resource cleanup.
 | `clipboard-files` | File clipboard read/write through the shared Shell data-object adapter |
 | `window-surface` | Premultiplied per-pixel alpha and configurable pointer pass-through |
 | `desktop-layer` | Non-activating windows above desktop surfaces and below normal applications |
+| `desktop-overlay` | Topmost overlay windows, logical placement and `NativeWindowEvent::MetricsChanged` |
+| `linux-wayland-layer` | Overlay-only native Wayland layers on compositors exposing `zwlr_layer_shell_v1` |
 | `windows-direct2d` | Explicit software or hardware Direct2D rasterization |
 | `dark-mode` | Appearance propagation into native controls and Shell views |
 | `hotkey` | Window-owned system-wide shortcuts with conflict reporting |
 
 The default renderer remains buffered GDI/GDI+. Enabling `windows-direct2d` does
 not switch ordinary windows automatically. Per-pixel surfaces select a software
-Direct2D target by default. The integration policies and native providers in this
-document are implemented by the Win32 host; other hosts return an explicit
-unsupported-capability error.
+Direct2D target by default. Win32 owns the full integration policy described
+below. AppKit and Linux Direct implement the overlay subset described in
+[Overlay windows](#overlay-windows); GTK4 and `linux-direct-lite` return an
+explicit unsupported-capability error for overlays.
 
 ## Native child slots
 
@@ -111,6 +114,50 @@ does not depend on the lifetime of an Explorer HWND.
 
 Desktop windows must be undecorated and cannot be always-on-top. Normal application
 windows retain their existing activation and stacking behavior.
+
+## Overlay windows
+
+`WindowLayer::Overlay { activate_on_click }` selects a topmost, undecorated
+window intended for desktop pets, HUDs and other desktop overlays. Overlay
+windows require `desktop-overlay` and can combine with
+`WindowSurface::PerPixelAlpha`. `activate_on_click=false` keeps the overlay
+non-activating; `true` allows a click to activate it for keyboard interaction.
+
+Use `WindowSpec::position` / `NativeWindowBuilder::position` for the initial
+logical placement and `AppCx::move_window_to` for runtime movement. Positions use
+the virtual-desktop top-left as the origin with `y` growing downward; native
+hosts convert them with the target monitor's scale.
+
+`NativeWindowEvent::MetricsChanged(WindowMetrics)` reports the current outer
+bounds, monitor work area and DPI after moves, resizes and scale changes. The
+application remains authoritative for where the overlay should go.
+
+Platform behavior:
+
+- **Win32:** layered windows use `WS_EX_LAYERED`, topmost/tool-window styles and
+  `WS_EX_NOACTIVATE` when `activate_on_click=false`. `AlphaHitTest::TransparentPixels`
+  relies on the layered-window alpha hit test; `PassThrough` adds
+  `WS_EX_TRANSPARENT`. Target proof is pending external validation.
+- **AppKit:** borderless floating windows use a clear background and
+  `drawRect:` skips the opaque page fill. `PassThrough` sets
+  `ignoresMouseEvents`; `TransparentPixels` renders an offscreen alpha mask from
+  the same draw plan, overrides `hitTest:` and toggles `ignoresMouseEvents` from
+  a global mouse monitor. Target proof is pending external validation.
+- **Linux Direct (X11/XWayland):** overlay windows are presented through an ARGB
+  depth-32 buffer, keep the frame topmost, and use an XShape input region derived
+  from the same alpha mask. Overlay windows select the X11 backend; on a Wayland
+  session this means XWayland.
+- **Native Wayland (`linux-wayland-layer`):** overlay-only applications create
+  `zwlr_layer_surface_v1` surfaces with ARGB8888 `wl_shm` buffers and
+  `wl_surface.set_input_region`. GNOME/KDE sessions without the protocol fall
+  back to XWayland. IME, menus, dialogs and accessibility are outside this
+  overlay-only backend in its first revision.
+- **GTK4 / `linux-direct-lite`:** overlays are unsupported in this revision.
+
+Application code must not branch on the display server. Unsupported overlay
+requests are rejected by the selected backend or degraded through
+`WindowSpec::resolve_for`; they are never silently presented as a different
+window model.
 
 ## Native menus
 
@@ -208,6 +255,24 @@ process and noninteractive window station. Recovery testing delivers
 `TaskbarCreated` to the target window; it does not restart Explorer. The report
 uses `zsui.windows-integration-proof/v1` and retains its capture mechanism and
 target architecture.
+
+The overlay example is platform-neutral:
+
+```powershell
+cargo run --example desktop_pet --features "window,canvas,desktop-overlay"
+```
+
+Its X11 smoke writes a PNG plus `native_overlay` evidence for depth, alpha
+coverage, XShape input rectangles, position and work area:
+
+```powershell
+cargo run --example desktop_pet --features "window,canvas,desktop-overlay,native-smoke" -- --smoke target/desktop-pet-proof
+```
+
+On Linux, add `linux-wayland-layer` to exercise the overlay-only layer-shell
+backend on a compositor exposing `zwlr_layer_shell_v1`; otherwise the example
+uses X11/XWayland. Win32 and AppKit overlay target interaction proof remains
+external validation work in this revision.
 
 Related native contracts: [DWM custom frames](https://learn.microsoft.com/en-us/windows/win32/dwm/customframe),
 [layered-window presentation](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-updatelayeredwindow),

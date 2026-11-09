@@ -1760,6 +1760,29 @@ history remain authoritative for implementation status.
   check caret pixels as well as messages; virtual dual-output scale evidence
   does not certify physical monitors or fractional-scale configurations.
 
+- Desktop overlays are a window-integration capability, not a second window
+  model. `WindowLayer::Overlay { activate_on_click }`, `WindowSpec::position`,
+  `AppCx::move_window_to` and `NativeWindowEvent::MetricsChanged` extend the
+  existing `native_window(...).stateful_view(...)` contract. Overlay windows are
+  always topmost and undecorated; `PerPixelAlpha` and `AlphaHitTest` remain the
+  surface contract.
+- Linux Direct owns the first complete overlay path: X11/XWayland uses an ARGB
+  depth-32 presenter, XShape input regions derived from the same alpha mask,
+  override-redirect or managed topmost windows, and work-area metrics. The
+  optional `linux-wayland-layer` feature adds an overlay-only native Wayland
+  backend using `zwlr_layer_shell_v1` and `wl_shm`; compositors without that
+  protocol fall back to XWayland, and the overlay-only backend does not yet
+  cover IME, menus, dialogs or accessibility. GTK4 and `linux-direct-lite`
+  reject overlays explicitly.
+- Win32 and AppKit overlay code lands behind the same public contract, but their
+  target proof is external validation work in this revision. AppKit provides a
+  transparent floating window, `PassThrough`, and a `TransparentPixels` alpha
+  mask plus dynamic `ignoresMouseEvents`; do not mark either platform
+  overlay-complete from cross-compilation alone.
+- Overlay windows are top-level windows. ZSUI still has no public child-window or
+  host-view embedding contract; applications that need an embedded surface must
+  use a normal top-level window or a product-specific backend.
+
 ## Acceptance applications
 
 - The notepad and calculator are acceptance applications, not product goals.
