@@ -185,6 +185,14 @@ pub unsafe extern "system" fn zsui_win32_default_window_proc(
                 HTCLIENT as LRESULT
             }
         }
+        WM_MOUSEACTIVATE => {
+            let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
+            if ex_style & WS_EX_NOACTIVATE != 0 {
+                MA_NOACTIVATE as LRESULT
+            } else {
+                unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+            }
+        }
         WM_ERASEBKGND => 1,
         #[cfg(feature = "accessibility")]
         WM_GETOBJECT => {

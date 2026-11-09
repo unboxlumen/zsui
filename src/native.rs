@@ -1411,6 +1411,21 @@ pub struct NativeWindowResizeEvidence {
     pub applied: bool,
 }
 
+/// Platform-neutral evidence for an overlay window's surface and hit region.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct NativeOverlayEvidence {
+    pub backend: &'static str,
+    pub layer: &'static str,
+    pub surface: &'static str,
+    pub hit_test: &'static str,
+    pub position: Option<Point>,
+    pub work_area: Option<Rect>,
+    pub window_depth: Option<u32>,
+    pub input_rectangle_count: usize,
+    pub alpha_pixel_count: usize,
+    pub opaque_pixel_count: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct NativeWindowSmokeRunReport {
     pub requested_window_count: usize,
@@ -1433,6 +1448,7 @@ pub struct NativeWindowSmokeRunReport {
     pub screenshot_captured: bool,
     pub screenshot_error: Option<String>,
     pub native_view_capture: Option<NativeViewCaptureEvidence>,
+    pub native_overlay: Option<NativeOverlayEvidence>,
     pub native_window_resize_required: bool,
     pub native_window_resize: Option<NativeWindowResizeEvidence>,
     pub native_window_resize_error: Option<String>,
@@ -1605,6 +1621,7 @@ impl NativeWindowSmokeRunReport {
             screenshot_captured: false,
             screenshot_error: None,
             native_view_capture: None,
+            native_overlay: None,
             native_window_resize_required: options.require_native_window_resize,
             native_window_resize: None,
             native_window_resize_error: None,
@@ -2119,6 +2136,7 @@ pub(crate) struct NativeViewInputDispatchReport {
     #[cfg(feature = "windows-shell")]
     pub drop_response: Option<crate::DropResponse>,
     pub quit_requested: bool,
+    pub window_position_request: Option<crate::WindowPosition>,
     #[cfg(feature = "window-chrome")]
     pub window_commands: Vec<crate::ZsWindowCommand>,
     pub errors: Vec<String>,
@@ -8812,6 +8830,7 @@ impl NativeViewInputRuntime {
                 .window_commands
                 .extend(update.window_commands.iter().copied());
             focus_request = update.focus_request;
+            report.window_position_request = update.window_position_request;
             if update.redraw {
                 report.redraw_plan = Some(live_view.draw_plan());
                 report.hit_target_count = live_view.interaction_plan().hit_target_count();
@@ -9149,6 +9168,7 @@ impl NativeViewInputRuntime {
             report.handled = true;
             report.message_count = update.message_count;
             focus_request = update.focus_request;
+            report.window_position_request = update.window_position_request;
             report.app_command_count = update.commands.len();
             report.ui_command_count = update.ui_commands.len();
             report.quit_requested =
@@ -9447,6 +9467,7 @@ impl NativeViewInputRuntime {
             #[cfg(feature = "text-input-core")]
             text_edit_commands.extend(update.text_edit_commands.iter().copied());
             focus_request = update.focus_request;
+            report.window_position_request = update.window_position_request;
             #[cfg(feature = "window-chrome")]
             report
                 .window_commands
@@ -10277,7 +10298,7 @@ impl NativeWindowBuilder {
     }
 
     /// Chooses normal or non-activating desktop stacking.
-    #[cfg(feature = "desktop-layer")]
+    #[cfg(any(feature = "desktop-layer", feature = "desktop-overlay"))]
     pub fn layer(mut self, layer: crate::WindowLayer) -> Self {
         self.window.integration.layer = layer;
         self
@@ -10353,6 +10374,18 @@ impl NativeWindowBuilder {
 
     pub fn min_size(mut self, width: u32, height: u32) -> Self {
         self.window = self.window.min_size(width, height);
+        self
+    }
+
+    /// Places the window at a logical virtual-desktop position.
+    pub fn position(mut self, position: crate::WindowPosition) -> Self {
+        self.window = self.window.position(position);
+        self
+    }
+
+    /// Places the window at logical `x`/`y` coordinates.
+    pub fn position_at(mut self, x: crate::Dp, y: crate::Dp) -> Self {
+        self.window = self.window.position_at(x, y);
         self
     }
 
@@ -10762,7 +10795,7 @@ impl<ContentState> TypedNativeWindowBuilder<ContentState> {
         self
     }
     /// Selects the native window layer.
-    #[cfg(feature = "desktop-layer")]
+    #[cfg(any(feature = "desktop-layer", feature = "desktop-overlay"))]
     pub fn layer(mut self, layer: crate::WindowLayer) -> Self {
         self.inner = self.inner.layer(layer);
         self
@@ -10791,6 +10824,18 @@ impl<ContentState> TypedNativeWindowBuilder<ContentState> {
 
     pub fn min_size(mut self, width: u32, height: u32) -> Self {
         self.inner = self.inner.min_size(width, height);
+        self
+    }
+
+    /// Places the window at a logical virtual-desktop position.
+    pub fn position(mut self, position: crate::WindowPosition) -> Self {
+        self.inner = self.inner.position(position);
+        self
+    }
+
+    /// Places the window at logical `x`/`y` coordinates.
+    pub fn position_at(mut self, x: crate::Dp, y: crate::Dp) -> Self {
+        self.inner = self.inner.position_at(x, y);
         self
     }
 

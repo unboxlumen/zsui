@@ -16,6 +16,67 @@ impl DesktopRuntimeBackend for Backend {
         "linux_direct"
     }
 
+    fn validate_window_integration(
+        &self,
+        windows: &[crate::WindowSpec],
+        plans: &[Option<crate::NativeDrawPlan>],
+    ) -> ZsuiResult<()> {
+        let overlay_supported = cfg!(all(feature = "desktop-overlay", feature = "linux-direct"));
+        for window in windows {
+            let integration = &window.integration;
+            if integration.title_bar.is_some() {
+                return Err(ZsuiError::unsupported(
+                    "window.title_bar",
+                    "the Linux direct host does not implement integrated system title bars",
+                ));
+            }
+            if integration.renderer != crate::WindowRenderer::Gdi {
+                return Err(ZsuiError::unsupported(
+                    "window.renderer",
+                    "the Linux direct host only provides its Cairo/Pango renderer",
+                ));
+            }
+            if matches!(integration.layer, crate::WindowLayer::Desktop { .. }) {
+                return Err(ZsuiError::unsupported(
+                    "window.layer",
+                    "the Linux direct host does not implement desktop-layer windows",
+                ));
+            }
+            if integration.layer.is_overlay() && !overlay_supported {
+                return Err(ZsuiError::unsupported(
+                    "window.layer",
+                    "enable desktop-overlay with linux-direct for X11/XWayland overlay windows",
+                ));
+            }
+            if integration.surface != crate::WindowSurface::Opaque && !overlay_supported {
+                return Err(ZsuiError::unsupported(
+                    "window.surface",
+                    "enable desktop-overlay with linux-direct for per-pixel-alpha windows",
+                ));
+            }
+            #[cfg(feature = "native-host")]
+            if !window.native_hosts.providers.is_empty() {
+                return Err(ZsuiError::unsupported(
+                    "native_host",
+                    "the Linux direct host does not implement native child providers",
+                ));
+            }
+        }
+        #[cfg(feature = "native-host")]
+        if plans
+            .iter()
+            .flatten()
+            .any(|plan| !plan.native_hosts.is_empty())
+        {
+            return Err(ZsuiError::unsupported(
+                "native_host",
+                "the Linux direct host does not implement native child slots",
+            ));
+        }
+        let _ = plans;
+        Ok(())
+    }
+
     fn run_event_loop(self, request: DesktopRuntimeRequest) -> ZsuiResult<()> {
         let _shell_runtimes = request.shell_runtimes;
         if !request.trays.is_empty() {
@@ -23,6 +84,15 @@ impl DesktopRuntimeBackend for Backend {
                 "native_window_status_item",
                 "the Linux direct status-item runtime is not connected to the unified event loop",
             ));
+        }
+        #[cfg(feature = "linux-wayland-layer")]
+        if crate::linux_wayland_layer::should_use_layer_shell(&request.windows) {
+            return crate::linux_wayland_layer::run_layer_shell_event_loop(
+                &request.windows,
+                &request.draw_plans,
+                &request.view_runtimes,
+            )
+            .map(|_| ());
         }
         crate::linux_direct::run_linux_direct_native_window_event_loop(
             &request.windows,
@@ -62,6 +132,7 @@ impl DesktopRuntimeBackend for Backend {
                 created_window_count: run.created_window_count,
                 proof_input_reports: run.proof_input_reports,
                 native_view_capture: run.native_view_capture,
+                native_overlay: run.native_overlay,
                 native_window_resize: run.native_window_resize,
                 native_window_resize_error: run.native_window_resize_error,
                 menu_command_routed: run.menu_command_routed,

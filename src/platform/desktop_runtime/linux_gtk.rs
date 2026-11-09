@@ -62,6 +62,7 @@ impl DesktopRuntimeBackend for Backend {
                 created_window_count: run.created_window_count,
                 proof_input_reports: run.proof_input_reports,
                 native_view_capture: run.native_view_capture,
+                native_overlay: None,
                 native_window_resize: run.native_window_resize,
                 native_window_resize_error: run.native_window_resize_error,
                 menu_command_routed: run.menu_command_routed,

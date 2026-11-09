@@ -101,6 +101,7 @@ pub(super) struct DesktopNativeSmokeOutcome {
     pub(super) created_window_count: usize,
     pub(super) proof_input_reports: Vec<crate::native::NativeViewInputDispatchReport>,
     pub(super) native_view_capture: Option<Result<crate::NativeViewCaptureEvidence, String>>,
+    pub(super) native_overlay: Option<crate::NativeOverlayEvidence>,
     pub(super) native_window_resize: Option<crate::NativeWindowResizeEvidence>,
     pub(super) native_window_resize_error: Option<String>,
     pub(super) menu_command_routed: bool,
@@ -384,6 +385,7 @@ pub(super) fn complete_native_smoke(
         metadata.proof_backend,
     );
     report.window_menu_command_routed = outcome.menu_command_routed;
+    report.native_overlay = outcome.native_overlay;
     report.window_menu_surface_created = outcome.menu_surface_created;
     report.window_menu_surface_height = outcome.menu_surface_height;
     report.window_menu_surface_open_at_capture = outcome.menu_surface_open_at_capture;
@@ -528,6 +530,7 @@ mod tests {
                 created_window_count: 1,
                 proof_input_reports: Vec::new(),
                 native_view_capture: None,
+                native_overlay: None,
                 native_window_resize: None,
                 native_window_resize_error: None,
                 menu_command_routed: false,
@@ -576,6 +579,7 @@ mod tests {
                 created_window_count: 1,
                 proof_input_reports: Vec::new(),
                 native_view_capture: None,
+                native_overlay: None,
                 native_window_resize: None,
                 native_window_resize_error: None,
                 menu_command_routed: false,

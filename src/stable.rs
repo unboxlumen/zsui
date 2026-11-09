@@ -61,7 +61,8 @@ pub use crate::ThemeColorToken;
 pub use crate::ZsWindowCommand as WindowCommand;
 /// Native-window appearance, stacking and presentation policies.
 pub use crate::{
-    AlphaHitTest, NativeWindowEvent, WindowBackdrop, WindowLayer, WindowRenderer, WindowSurface,
+    AlphaHitTest, NativeWindowEvent, WindowBackdrop, WindowLayer, WindowMetrics, WindowRenderer,
+    WindowSurface,
 };
 /// Resolved system palette and its semantic colors.
 pub use crate::{Color, PlatformPalette, ZsuiThemeMode as ThemeMode};
@@ -489,6 +490,13 @@ impl UpdateContext<'_> {
     pub fn focus(&mut self, widget: WidgetId) {
         self.inner.focus(widget.into());
     }
+    /// Moves the window to a logical virtual-desktop position after the update.
+    pub fn move_window_to(&mut self, x: Dp, y: Dp) {
+        self.inner.move_window_to(crate::WindowPosition::new(
+            crate::Dp::new(x.get()),
+            crate::Dp::new(y.get()),
+        ));
+    }
     /// Acknowledges a completed native drop; move/link operations require it.
     #[cfg(feature = "windows-shell")]
     pub fn accept_drop(&mut self, effect: DropEffect) {
@@ -694,9 +702,17 @@ impl WindowBuilder {
     }
 
     /// Selects normal or non-activating desktop stacking.
-    #[cfg(feature = "desktop-layer")]
+    #[cfg(any(feature = "desktop-layer", feature = "desktop-overlay"))]
     pub fn layer(mut self, layer: WindowLayer) -> Self {
         self.inner = self.inner.layer(layer);
+        self
+    }
+
+    /// Places the initial window at a logical virtual-desktop position.
+    pub fn position(mut self, x: Dp, y: Dp) -> Self {
+        self.inner = self
+            .inner
+            .position_at(crate::Dp::new(x.get()), crate::Dp::new(y.get()));
         self
     }
 

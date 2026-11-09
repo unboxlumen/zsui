@@ -20,6 +20,28 @@ impl CaptionMetrics {
     }
 }
 
+/// Physical bounds, work area and scale for one native window.
+///
+/// `bounds` and `work_area` use desktop physical pixels, with the primary
+/// monitor's top-left corner as the origin. `dpi` is the window's current
+/// scale in DPI units.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowMetrics {
+    /// Current outer window bounds.
+    pub bounds: crate::Rect,
+    /// Monitor work area that excludes panels, docks and taskbars.
+    pub work_area: crate::Rect,
+    /// Current window DPI.
+    pub dpi: u32,
+}
+
+impl WindowMetrics {
+    /// Logical scale factor derived from `dpi`.
+    pub fn scale_factor(self) -> f32 {
+        self.dpi.max(96) as f32 / 96.0
+    }
+}
+
 /// Typed notifications emitted by the native window's integration services.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NativeWindowEvent {
@@ -29,6 +51,8 @@ pub enum NativeWindowEvent {
     ThemeChanged(crate::PlatformPalette),
     /// Caption geometry changed after creation, resizing, or a DPI transition.
     CaptionChanged(CaptionMetrics),
+    /// Window bounds, monitor work area or DPI changed.
+    MetricsChanged(WindowMetrics),
     /// Desktop integration was re-established after the system shell restarted.
     DesktopRecreated,
     /// A recoverable native service operation failed.
@@ -117,6 +141,18 @@ pub enum WindowLayer {
     Normal,
     /// A non-activating desktop surface, below normal application windows.
     Desktop { follow_show_desktop: bool },
+    /// A topmost overlay such as a desktop pet or HUD.
+    ///
+    /// Overlays are always placed above normal windows and are always
+    /// undecorated. `activate_on_click=false` keeps them from taking focus.
+    Overlay { activate_on_click: bool },
+}
+
+impl WindowLayer {
+    /// Whether this layer is a topmost overlay.
+    pub const fn is_overlay(self) -> bool {
+        matches!(self, Self::Overlay { .. })
+    }
 }
 
 /// Windows rasterization policy. The default preserves the GDI paint path.
@@ -162,6 +198,18 @@ impl WindowIntegration {
                 "desktop windows must be undecorated and cannot be always-on-top",
             ));
         }
+        if self.layer.is_overlay() && decorations {
+            return Err(crate::ZsuiError::invalid_spec(
+                "window.layer",
+                "overlay windows must be undecorated",
+            ));
+        }
+        if self.layer.is_overlay() && self.title_bar.is_some() {
+            return Err(crate::ZsuiError::invalid_spec(
+                "window.layer",
+                "overlay windows cannot use an integrated system title bar",
+            ));
+        }
         if self.surface != WindowSurface::Opaque && decorations {
             return Err(crate::ZsuiError::invalid_spec(
                 "window.surface",
@@ -196,5 +244,46 @@ mod tests {
         };
         assert!(options.validate(false, false).is_ok());
         assert!(options.validate(false, true).is_err());
+    }
+
+    #[test]
+    fn overlay_layer_requires_an_undecorated_window() {
+        let mut options = WindowIntegration {
+            layer: WindowLayer::Overlay {
+                activate_on_click: false,
+            },
+            ..Default::default()
+        };
+        assert!(options.validate(false, false).is_ok());
+        assert!(options.validate(true, false).is_err());
+        options.layer = WindowLayer::Overlay {
+            activate_on_click: true,
+        };
+        options.surface = WindowSurface::PerPixelAlpha {
+            hit_test: AlphaHitTest::TransparentPixels,
+        };
+        assert!(options.validate(false, false).is_ok());
+        options.title_bar = Some(IntegratedTitleBar::default());
+        assert!(options.validate(false, false).is_err());
+    }
+
+    #[test]
+    fn window_metrics_reports_logical_scale() {
+        let metrics = WindowMetrics {
+            bounds: crate::Rect {
+                x: -100,
+                y: -50,
+                width: 200,
+                height: 100,
+            },
+            work_area: crate::Rect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            },
+            dpi: 144,
+        };
+        assert!((metrics.scale_factor() - 1.5).abs() < 0.001);
     }
 }

@@ -130,6 +130,10 @@ impl WindowsWin32ViewInputRoute {
         std::mem::take(&mut self.quit_requested)
     }
 
+    fn take_pending_window_position(&mut self) -> Option<crate::WindowPosition> {
+        self.pending_window_position.take()
+    }
+
     #[cfg(feature = "window-chrome")]
     fn take_pending_window_commands(&mut self) -> Vec<crate::ZsWindowCommand> {
         std::mem::take(&mut self.pending_window_commands)
@@ -390,6 +394,9 @@ impl WindowsWin32ViewInputRoute {
             self.pending_draw_plan = Some(plan);
         }
         self.quit_requested |= shared.quit_requested;
+        if shared.window_position_request.is_some() {
+            self.pending_window_position = shared.window_position_request;
+        }
         #[cfg(feature = "window-chrome")]
         let window_commands = std::mem::take(&mut shared.window_commands);
         #[cfg(feature = "window-chrome")]

@@ -8,9 +8,8 @@ use std::{
 #[path = "macos_symbolic_icons.rs"]
 mod symbolic_icons;
 
-use objc2::rc::Retained;
-#[cfg(feature = "accessibility")]
-use objc2::rc::Weak;
+use block2::RcBlock;
+use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyObject, ProtocolObject, Sel};
 #[cfg(feature = "accessibility")]
 use objc2::Message;
@@ -33,17 +32,18 @@ use objc2_app_kit::{NSAccessibilityMenuItemRole, NSAccessibilityMenuRole};
 use objc2_app_kit::{NSAccessibilitySecureTextFieldSubrole, NSAccessibilityTextFieldRole};
 use objc2_app_kit::{
     NSAutoresizingMaskOptions, NSBackspaceCharacter, NSBezierPath, NSBitmapImageFileType,
-    NSBitmapImageRepPropertyKey, NSCarriageReturnCharacter, NSColor, NSColorSpace,
-    NSDeleteCharacter, NSDownArrowFunctionKey, NSEndFunctionKey, NSEnterCharacter, NSEvent,
-    NSEventModifierFlags, NSFont, NSFontAttributeName, NSFontTextStyle, NSFontTextStyleBody,
-    NSFontTextStyleCaption1, NSFontTextStyleLargeTitle, NSFontTextStyleOptionKey,
-    NSFontTextStyleTitle1, NSFontTextStyleTitle2, NSFontTextStyleTitle3, NSFontWeightBold,
-    NSFontWeightMedium, NSFontWeightRegular, NSFontWeightSemibold, NSForegroundColorAttributeName,
-    NSGraphicsContext, NSHomeFunctionKey, NSImage, NSLeftArrowFunctionKey, NSLineBreakMode,
-    NSMutableParagraphStyle, NSPageDownFunctionKey, NSPageUpFunctionKey,
-    NSParagraphStyleAttributeName, NSRightArrowFunctionKey, NSStringDrawing,
-    NSStringDrawingOptions, NSStringNSExtendedStringDrawing, NSTabCharacter, NSTextAlignment,
-    NSTextInputClient, NSTrackingArea, NSTrackingAreaOptions, NSUpArrowFunctionKey, NSView,
+    NSBitmapImageRep, NSBitmapImageRepPropertyKey, NSCarriageReturnCharacter, NSColor,
+    NSColorSpace, NSDeleteCharacter, NSDeviceRGBColorSpace, NSDownArrowFunctionKey,
+    NSEndFunctionKey, NSEnterCharacter, NSEvent, NSEventMask, NSEventModifierFlags, NSFont,
+    NSFontAttributeName, NSFontTextStyle, NSFontTextStyleBody, NSFontTextStyleCaption1,
+    NSFontTextStyleLargeTitle, NSFontTextStyleOptionKey, NSFontTextStyleTitle1,
+    NSFontTextStyleTitle2, NSFontTextStyleTitle3, NSFontWeightBold, NSFontWeightMedium,
+    NSFontWeightRegular, NSFontWeightSemibold, NSForegroundColorAttributeName, NSGraphicsContext,
+    NSHomeFunctionKey, NSImage, NSLeftArrowFunctionKey, NSLineBreakMode, NSMutableParagraphStyle,
+    NSPageDownFunctionKey, NSPageUpFunctionKey, NSParagraphStyleAttributeName,
+    NSRightArrowFunctionKey, NSScreen, NSStringDrawing, NSStringDrawingOptions,
+    NSStringNSExtendedStringDrawing, NSTabCharacter, NSTextAlignment, NSTextInputClient,
+    NSTrackingArea, NSTrackingAreaOptions, NSUpArrowFunctionKey, NSView,
 };
 #[cfg(feature = "accessibility")]
 use objc2_foundation::NSNumber;
@@ -123,6 +123,13 @@ const CORE_GRAPHICS_RENDERING_INTENT_DEFAULT: i32 = 0;
 const CORE_GRAPHICS_INTERPOLATION_NONE: i32 = 1;
 const CORE_GRAPHICS_INTERPOLATION_HIGH: i32 = 3;
 
+struct MacosAlphaMask {
+    width: usize,
+    height: usize,
+    alpha: Vec<u8>,
+    plan: NativeDrawPlan,
+}
+
 struct ZsuiAppKitDrawViewIvars {
     plan: RefCell<NativeDrawPlan>,
     runtime: RefCell<crate::native::NativeViewInputRuntime>,
@@ -131,6 +138,10 @@ struct ZsuiAppKitDrawViewIvars {
     marked_text: RefCell<String>,
     marked_selection: Cell<Option<(usize, usize)>>,
     ime_dispatched: Cell<bool>,
+    transparent: Cell<bool>,
+    per_pixel_hit_test: Cell<bool>,
+    alpha_mask: RefCell<Option<MacosAlphaMask>>,
+    overlay_monitor: RefCell<Option<Retained<AnyObject>>>,
 }
 
 define_class!(
@@ -524,6 +535,23 @@ define_class!(
             true
         }
 
+        #[unsafe(method(hitTest:))]
+        fn hit_test(&self, point: NSPoint) -> *mut NSView {
+            if !self.ivars().transparent.get() || !self.ivars().per_pixel_hit_test.get() {
+                return unsafe { msg_send![super(self), hitTest: point] };
+            }
+            let Some(window) = self.window() else {
+                return std::ptr::null_mut();
+            };
+            let local = self
+                .convertPoint_fromView(window.convertPointFromScreen(NSEvent::mouseLocation()), None);
+            if self.alpha_at(local) {
+                unsafe { msg_send![super(self), hitTest: point] }
+            } else {
+                std::ptr::null_mut()
+            }
+        }
+
         #[unsafe(method(resignFirstResponder))]
         fn resign_first_responder(&self) -> bool {
             self.ivars().marked_text.borrow_mut().clear();
@@ -569,9 +597,14 @@ define_class!(
                     .flatten(),
             );
             appkit_color(palette.surface).set();
-            NSBezierPath::bezierPathWithRect(bounds).fill();
+            if !self.ivars().transparent.get() {
+                NSBezierPath::bezierPathWithRect(bounds).fill();
+            }
             let mut sink = MacosAppKitDrawSink::new(palette, plan.typography_scale());
             sink.draw_plan(&plan);
+            if self.ivars().per_pixel_hit_test.get() {
+                self.rebuild_alpha_mask(palette, bounds, &plan);
+            }
         }
 
         #[unsafe(method(viewDidChangeBackingProperties))]
@@ -1766,6 +1799,17 @@ impl ZsuiAppKitDrawView {
             }
         }
 
+        if let Some(position) = report.window_position_request {
+            if let Some(window) = self.window() {
+                if let Some(primary) = NSScreen::screens(self.mtm()).firstObject() {
+                    let frame = primary.frame();
+                    let top = frame.origin.y + frame.size.height - position.y().0 as f64;
+                    window.setFrameTopLeftPoint(NSPoint::new(position.x().0 as f64, top));
+                    self.setNeedsDisplay(true);
+                }
+            }
+        }
+
         if let Some(plan) = report.redraw_plan.clone() {
             *self.ivars().plan.borrow_mut() = plan;
             self.setNeedsDisplay(true);
@@ -1844,6 +1888,10 @@ impl ZsuiAppKitDrawView {
             marked_text: RefCell::new(String::new()),
             marked_selection: Cell::new(None),
             ime_dispatched: Cell::new(false),
+            transparent: Cell::new(false),
+            per_pixel_hit_test: Cell::new(false),
+            alpha_mask: RefCell::new(None),
+            overlay_monitor: RefCell::new(None),
         });
         let this: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
         this.install_invalidation_wake();
@@ -1866,6 +1914,148 @@ impl ZsuiAppKitDrawView {
             )
         };
         self.addTrackingArea(&tracking_area);
+    }
+
+    fn set_per_pixel_hit_test(&self, enabled: bool) {
+        self.ivars().per_pixel_hit_test.set(enabled);
+        if enabled {
+            if self.ivars().overlay_monitor.borrow().is_some() {
+                return;
+            }
+            let weak = Weak::from(self);
+            let block = RcBlock::new(move |_event: NonNull<NSEvent>| {
+                if let Some(view) = weak.load() {
+                    view.update_overlay_hit_test();
+                }
+            });
+            let monitor = NSEvent::addGlobalMonitorForEventsMatchingMask_handler(
+                NSEventMask::MouseMoved
+                    | NSEventMask::LeftMouseDragged
+                    | NSEventMask::RightMouseDragged
+                    | NSEventMask::OtherMouseDragged,
+                &block,
+            );
+            *self.ivars().overlay_monitor.borrow_mut() = monitor;
+        } else {
+            if let Some(monitor) = self.ivars().overlay_monitor.borrow_mut().take() {
+                unsafe { NSEvent::removeMonitor(&monitor) };
+            }
+            self.ivars().alpha_mask.borrow_mut().take();
+            if let Some(window) = self.window() {
+                window.setIgnoresMouseEvents(false);
+            }
+        }
+    }
+
+    fn rebuild_alpha_mask(
+        &self,
+        palette: NativeDrawPalette,
+        bounds: NSRect,
+        plan: &NativeDrawPlan,
+    ) {
+        if !self.ivars().per_pixel_hit_test.get() {
+            return;
+        }
+        let width = bounds.size.width.ceil().max(1.0) as usize;
+        let height = bounds.size.height.ceil().max(1.0) as usize;
+        if self
+            .ivars()
+            .alpha_mask
+            .borrow()
+            .as_ref()
+            .is_some_and(|mask| mask.width == width && mask.height == height && mask.plan == *plan)
+        {
+            return;
+        }
+        let color_space = unsafe { NSDeviceRGBColorSpace };
+        let rep = unsafe {
+            NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
+                NSBitmapImageRep::alloc(),
+                std::ptr::null_mut(),
+                width as isize,
+                height as isize,
+                8,
+                4,
+                true,
+                false,
+                color_space,
+                width.saturating_mul(4) as isize,
+                32,
+            )
+        };
+        let Some(rep) = rep else {
+            return;
+        };
+        let Some(context) = NSGraphicsContext::graphicsContextWithBitmapImageRep(&rep) else {
+            return;
+        };
+        let previous = NSGraphicsContext::currentContext();
+        NSGraphicsContext::saveGraphicsState_class();
+        NSGraphicsContext::setCurrentContext(Some(&context));
+        let cg = context.CGContext();
+        objc2_core_graphics::CGContextTranslateCTM(Some(&cg), 0.0, height as f64);
+        objc2_core_graphics::CGContextScaleCTM(Some(&cg), 1.0, -1.0);
+        NSColor::clearColor().set();
+        NSBezierPath::bezierPathWithRect(NSRect::new(
+            NSPoint::new(0.0, 0.0),
+            NSSize::new(width as f64, height as f64),
+        ))
+        .fill();
+        let mut sink = MacosAppKitDrawSink::new(palette, plan.typography_scale());
+        sink.draw_plan(plan);
+        NSGraphicsContext::restoreGraphicsState_class();
+        NSGraphicsContext::setCurrentContext(previous.as_deref());
+        let data = rep.bitmapData();
+        if data.is_null() {
+            return;
+        }
+        let stride = rep.bytesPerRow() as usize;
+        let mut alpha = vec![0u8; width.saturating_mul(height)];
+        for y in 0..height {
+            for x in 0..width {
+                alpha[y * width + x] = unsafe { *data.add(y * stride + x * 4 + 3) };
+            }
+        }
+        *self.ivars().alpha_mask.borrow_mut() = Some(MacosAlphaMask {
+            width,
+            height,
+            alpha,
+            plan: plan.clone(),
+        });
+    }
+
+    fn alpha_at(&self, point: NSPoint) -> bool {
+        let mask = self.ivars().alpha_mask.borrow();
+        let Some(mask) = mask.as_ref() else {
+            return true;
+        };
+        if point.x < 0.0 || point.y < 0.0 {
+            return false;
+        }
+        let x = point.x.floor() as usize;
+        let y = point.y.floor() as usize;
+        if x >= mask.width || y >= mask.height {
+            return false;
+        }
+        mask.alpha[y * mask.width + x] > 0
+    }
+
+    fn update_overlay_hit_test(&self) {
+        let Some(window) = self.window() else {
+            return;
+        };
+        let local = self.convertPoint_fromView(
+            window.convertPointFromScreen(NSEvent::mouseLocation()),
+            None,
+        );
+        let bounds = self.bounds();
+        if local.x >= 0.0
+            && local.y >= 0.0
+            && local.x < bounds.size.width
+            && local.y < bounds.size.height
+        {
+            window.setIgnoresMouseEvents(!self.alpha_at(local));
+        }
     }
 }
 
@@ -2061,6 +2251,15 @@ impl std::fmt::Debug for MacosAppKitDrawViewHost {
 }
 
 impl MacosAppKitDrawViewHost {
+    pub(crate) fn set_transparent(&self, transparent: bool) {
+        self.view.ivars().transparent.set(transparent);
+        self.view.setNeedsDisplay(true);
+    }
+
+    pub(crate) fn set_per_pixel_hit_test(&self, enabled: bool) {
+        self.view.set_per_pixel_hit_test(enabled);
+    }
+
     pub(crate) fn resize_native_window(
         &self,
         requested: crate::Size,

@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     DesktopCapabilities, DialogResponse, FileDialogSpec, HostCapabilities, NativeDialogSpec,
-    NativeWindowSmokeRunReport, SaveFileDialogSpec, ZsuiResult,
+    NativeWindowSmokeRunReport, SaveFileDialogSpec, ZsuiError, ZsuiResult,
 };
 
 #[derive(Default)]
@@ -14,6 +14,67 @@ impl DesktopRuntimeBackend for Backend {
     #[cfg(test)]
     fn backend_name(&self) -> &'static str {
         "macos_appkit"
+    }
+
+    fn validate_window_integration(
+        &self,
+        windows: &[crate::WindowSpec],
+        plans: &[Option<crate::NativeDrawPlan>],
+    ) -> ZsuiResult<()> {
+        let overlay_supported = cfg!(feature = "desktop-overlay");
+        for window in windows {
+            let integration = &window.integration;
+            if integration.title_bar.is_some() {
+                return Err(ZsuiError::unsupported(
+                    "window.title_bar",
+                    "the AppKit host does not implement integrated system title bars",
+                ));
+            }
+            if integration.renderer != crate::WindowRenderer::Gdi {
+                return Err(ZsuiError::unsupported(
+                    "window.renderer",
+                    "the AppKit host uses its native Core Graphics renderer",
+                ));
+            }
+            if matches!(integration.layer, crate::WindowLayer::Desktop { .. }) {
+                return Err(ZsuiError::unsupported(
+                    "window.layer",
+                    "the AppKit host does not implement desktop-layer windows",
+                ));
+            }
+            if integration.layer.is_overlay() && !overlay_supported {
+                return Err(ZsuiError::unsupported(
+                    "window.layer",
+                    "enable desktop-overlay for AppKit overlay panels",
+                ));
+            }
+            if integration.surface != crate::WindowSurface::Opaque && !overlay_supported {
+                return Err(ZsuiError::unsupported(
+                    "window.surface",
+                    "enable desktop-overlay for per-pixel-alpha AppKit windows",
+                ));
+            }
+            #[cfg(feature = "native-host")]
+            if !window.native_hosts.providers.is_empty() {
+                return Err(ZsuiError::unsupported(
+                    "native_host",
+                    "the AppKit host does not implement native child providers",
+                ));
+            }
+        }
+        #[cfg(feature = "native-host")]
+        if plans
+            .iter()
+            .flatten()
+            .any(|plan| !plan.native_hosts.is_empty())
+        {
+            return Err(ZsuiError::unsupported(
+                "native_host",
+                "the AppKit host does not implement native child slots",
+            ));
+        }
+        let _ = plans;
+        Ok(())
     }
 
     fn run_event_loop(self, request: DesktopRuntimeRequest) -> ZsuiResult<()> {
@@ -65,6 +126,7 @@ impl DesktopRuntimeBackend for Backend {
                 created_window_count: run.created_window_count,
                 proof_input_reports: run.proof_input_reports,
                 native_view_capture: run.native_view_capture,
+                native_overlay: None,
                 native_window_resize: run.native_window_resize,
                 native_window_resize_error: run.native_window_resize_error,
                 menu_command_routed: run.menu_command_routed,

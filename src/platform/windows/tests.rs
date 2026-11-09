@@ -165,6 +165,27 @@ mod tests {
     }
 
     #[test]
+    fn overlay_window_forces_topmost_tool_and_optional_no_activate() {
+        let mut options = NativeWindowOptions::standard();
+        options.decorations = false;
+        options.layer = crate::WindowLayer::Overlay {
+            activate_on_click: false,
+        };
+        let plan = windows_win32_main_window_style_plan(WindowsWindowRole::Main, &options);
+        assert_ne!(plan.ex_style & WS_EX_TOPMOST, 0);
+        assert_ne!(plan.ex_style & WS_EX_TOOLWINDOW, 0);
+        assert_ne!(plan.ex_style & WS_EX_NOACTIVATE, 0);
+        assert_ne!(plan.style & WS_POPUP, 0);
+
+        options.layer = crate::WindowLayer::Overlay {
+            activate_on_click: true,
+        };
+        let plan = windows_win32_main_window_style_plan(WindowsWindowRole::Main, &options);
+        assert_ne!(plan.ex_style & WS_EX_TOPMOST, 0);
+        assert_eq!(plan.ex_style & WS_EX_NOACTIVATE, 0);
+    }
+
+    #[test]
     fn decorated_window_converts_requested_client_size_to_outer_size() {
         let plan = windows_win32_main_window_style_plan(
             WindowsWindowRole::Main,

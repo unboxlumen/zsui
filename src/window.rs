@@ -4,11 +4,70 @@ use crate::capability::{CapabilityStatus, CapabilitySupport, HostCapabilities};
 use crate::components::UiNode;
 use crate::menu::MenuSpec;
 
+/// A logical position in the virtual desktop.
+///
+/// The origin is the top-left of the primary monitor, with `y` growing
+/// downward. Native hosts convert this to their platform coordinate space
+/// using the target monitor's DPI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowPosition {
+    x_milli_dp: i32,
+    y_milli_dp: i32,
+}
+
+impl WindowPosition {
+    /// Creates a position from logical DP coordinates.
+    pub fn new(x: crate::Dp, y: crate::Dp) -> Self {
+        Self {
+            x_milli_dp: dp_to_milli(x),
+            y_milli_dp: dp_to_milli(y),
+        }
+    }
+
+    /// Creates a position from milli-DP values, matching the serialized form.
+    pub const fn from_milli_dp(x_milli_dp: i32, y_milli_dp: i32) -> Self {
+        Self {
+            x_milli_dp,
+            y_milli_dp,
+        }
+    }
+
+    /// The horizontal logical coordinate.
+    pub fn x(self) -> crate::Dp {
+        crate::Dp::new(self.x_milli_dp as f32 / 1000.0)
+    }
+
+    /// The vertical logical coordinate.
+    pub fn y(self) -> crate::Dp {
+        crate::Dp::new(self.y_milli_dp as f32 / 1000.0)
+    }
+
+    /// Converts this position to physical pixels for `dpi`.
+    pub fn to_physical(self, dpi: crate::Dpi) -> (i32, i32) {
+        (
+            self.x().to_px(dpi).round_i32(),
+            self.y().to_px(dpi).round_i32(),
+        )
+    }
+}
+
+fn dp_to_milli(value: crate::Dp) -> i32 {
+    if !value.0.is_finite() {
+        return 0;
+    }
+    (value.0 * 1000.0)
+        .round()
+        .clamp(i32::MIN as f32, i32::MAX as f32) as i32
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WindowSpec {
     pub title: String,
     pub width: u32,
     pub height: u32,
+    /// Optional initial logical position in the virtual desktop.
+    #[serde(default)]
+    pub position: Option<WindowPosition>,
     pub min_width: Option<u32>,
     pub min_height: Option<u32>,
     pub visible: bool,
@@ -43,6 +102,7 @@ pub type Window = WindowSpec;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WindowNativeOptions {
+    pub position: Option<WindowPosition>,
     pub min_width: Option<u32>,
     pub min_height: Option<u32>,
     pub resizable: bool,
@@ -64,6 +124,7 @@ impl WindowSpec {
             title: title.into(),
             width: 900,
             height: 620,
+            position: None,
             min_width: None,
             min_height: None,
             visible: true,
@@ -88,6 +149,17 @@ impl WindowSpec {
         self.width = width;
         self.height = height;
         self
+    }
+
+    /// Places the initial window at a logical virtual-desktop position.
+    pub fn position(mut self, position: WindowPosition) -> Self {
+        self.position = Some(position);
+        self
+    }
+
+    /// Places the initial window at logical `x`/`y` coordinates.
+    pub fn position_at(self, x: crate::Dp, y: crate::Dp) -> Self {
+        self.position(WindowPosition::new(x, y))
     }
 
     pub fn min_size(mut self, width: u32, height: u32) -> Self {
@@ -149,6 +221,7 @@ impl WindowSpec {
 
     pub fn native_options(&self) -> WindowNativeOptions {
         WindowNativeOptions {
+            position: self.position,
             min_width: self.min_width,
             min_height: self.min_height,
             resizable: self.resizable,
@@ -173,6 +246,14 @@ impl WindowSpec {
         }
         if capabilities.window_transparency.status == CapabilityStatus::Unsupported {
             effective.transparent = false;
+        }
+        if capabilities.window_positioning.status == CapabilityStatus::Unsupported {
+            effective.position = None;
+        }
+        if capabilities.window_overlay.status == CapabilityStatus::Unsupported
+            && effective.integration.layer.is_overlay()
+        {
+            effective.integration.layer = crate::WindowLayer::Normal;
         }
 
         WindowResolvedSpec {
@@ -239,6 +320,31 @@ impl WindowSpec {
                 "host may present an opaque native window",
             );
         }
+        if self.position.is_some() {
+            push_if_degraded(
+                &mut degraded,
+                "window_positioning",
+                &capabilities.window_positioning,
+                "positioned window",
+                "host may place the window at its default location",
+            );
+        }
+        if self.integration.layer.is_overlay() {
+            push_if_degraded(
+                &mut degraded,
+                "window_overlay",
+                &capabilities.window_overlay,
+                "overlay window",
+                "host may present a normal window with reduced stacking and activation behavior",
+            );
+            push_if_degraded(
+                &mut degraded,
+                "window_metrics",
+                &capabilities.window_metrics,
+                "window bounds and work-area metrics",
+                "host may not report monitor work-area changes",
+            );
+        }
         degraded
     }
 }
@@ -257,4 +363,18 @@ fn push_if_degraded(
         "{capability}: requested {requested}; fallback {fallback}; {}",
         support.detail
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn window_position_round_trips_logical_coordinates() {
+        let position = WindowPosition::new(crate::Dp::new(-12.5), crate::Dp::new(4.25));
+        assert_eq!(position.x(), crate::Dp::new(-12.5));
+        assert_eq!(position.y(), crate::Dp::new(4.25));
+        assert_eq!(position.to_physical(crate::Dpi::standard()), (-13, 4));
+        assert_eq!(WindowPosition::from_milli_dp(-12_500, 4_250), position);
+    }
 }

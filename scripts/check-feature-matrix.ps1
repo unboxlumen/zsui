@@ -50,6 +50,8 @@ $singleFeatures = @(
     "native-host",
     "window-surface",
     "desktop-layer",
+    "desktop-overlay",
+    "linux-wayland-layer",
     "windows-shell",
     "windows-direct2d",
     "password-box",

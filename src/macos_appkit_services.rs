@@ -1,6 +1,6 @@
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     rc::Rc,
 };
@@ -20,9 +20,9 @@ use objc2::{define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOn
 use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSAlertSecondButtonReturn, NSAlertStyle,
     NSAlertThirdButtonReturn, NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
-    NSBackingStoreType, NSEventMask, NSFloatingWindowLevel, NSModalResponseCancel,
+    NSBackingStoreType, NSColor, NSEventMask, NSFloatingWindowLevel, NSModalResponseCancel,
     NSModalResponseOK, NSOpenPanel, NSPasteboard, NSPasteboardTypeString, NSSavePanel, NSWindow,
-    NSWindowDelegate, NSWindowStyleMask,
+    NSWindowCollectionBehavior, NSWindowDelegate, NSWindowStyleMask,
 };
 #[cfg(feature = "native-smoke")]
 use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRepPropertyKey, NSModalPanelRunLoopMode};
@@ -489,6 +489,8 @@ pub struct MacosAppKitWindowService {
     _application: Retained<NSApplication>,
     windows: HashMap<WindowId, Retained<NSWindow>>,
     view_hosts: HashMap<WindowId, crate::macos_appkit_renderer::MacosAppKitDrawViewHost>,
+    transparent_windows: HashSet<WindowId>,
+    per_pixel_hit_test_windows: HashSet<WindowId>,
     next_window_id: u64,
 }
 
@@ -502,6 +504,8 @@ impl MacosAppKitWindowService {
             _application: application,
             windows: HashMap::new(),
             view_hosts: HashMap::new(),
+            transparent_windows: HashSet::new(),
+            per_pixel_hit_test_windows: HashSet::new(),
             next_window_id: 1,
         })
     }
@@ -534,6 +538,8 @@ impl MacosAppKitWindowService {
             plan,
             runtime,
         );
+        view_host.set_transparent(self.transparent_windows.contains(&window));
+        view_host.set_per_pixel_hit_test(self.per_pixel_hit_test_windows.contains(&window));
         self.view_hosts.insert(window, view_host);
         Ok(())
     }
@@ -569,10 +575,14 @@ impl Drop for MacosAppKitWindowService {
 impl WindowService for MacosAppKitWindowService {
     fn create_window(&mut self, spec: &WindowSpec) -> ZsuiResult<WindowId> {
         let mtm = appkit_main_thread_marker("macos_create_window")?;
-        if spec.transparent {
+        let overlay = spec.integration.layer.is_overlay();
+        let transparent =
+            spec.transparent || spec.integration.surface != crate::WindowSurface::Opaque;
+        #[cfg(not(feature = "desktop-overlay"))]
+        if transparent || overlay {
             return Err(ZsuiError::unsupported(
                 "window_transparency",
-                "the AppKit transparent window surface is not connected",
+                "enable desktop-overlay for AppKit transparent overlay windows",
             ));
         }
         let mut style = if spec.decorations || spec.custom_title_bar {
@@ -582,7 +592,7 @@ impl WindowService for MacosAppKitWindowService {
         } else {
             NSWindowStyleMask::Borderless
         };
-        if spec.resizable {
+        if spec.resizable && !overlay {
             style |= NSWindowStyleMask::Resizable;
         }
         if spec.custom_title_bar {
@@ -622,11 +632,63 @@ impl WindowService for MacosAppKitWindowService {
         if spec.always_on_top {
             window.setLevel(NSFloatingWindowLevel);
         }
-        window.center();
+        if overlay || transparent {
+            window.setOpaque(false);
+            let clear = NSColor::clearColor();
+            window.setBackgroundColor(Some(&clear));
+            window.setHasShadow(false);
+            window.setLevel(NSFloatingWindowLevel);
+            window.setCollectionBehavior(
+                NSWindowCollectionBehavior::CanJoinAllSpaces
+                    | NSWindowCollectionBehavior::Stationary,
+            );
+            window.setHidesOnDeactivate(false);
+            if matches!(
+                spec.integration.surface,
+                crate::WindowSurface::PerPixelAlpha {
+                    hit_test: crate::AlphaHitTest::PassThrough
+                }
+            ) {
+                window.setIgnoresMouseEvents(true);
+            }
+        }
+        if let Some(position) = spec.position {
+            if let Some(primary) = objc2_app_kit::NSScreen::screens(mtm).firstObject() {
+                let frame = primary.frame();
+                let top = frame.origin.y + frame.size.height - position.y().0 as f64;
+                window.setFrameTopLeftPoint(NSPoint::new(position.x().0 as f64, top));
+            } else {
+                window.center();
+            }
+        } else {
+            window.center();
+        }
         if spec.visible {
-            window.makeKeyAndOrderFront(None);
+            if overlay
+                && matches!(
+                    spec.integration.layer,
+                    crate::WindowLayer::Overlay {
+                        activate_on_click: false
+                    }
+                )
+            {
+                window.orderFrontRegardless();
+            } else {
+                window.makeKeyAndOrderFront(None);
+            }
         }
         let id = self.allocate_window_id()?;
+        if overlay || transparent {
+            self.transparent_windows.insert(id);
+        }
+        if matches!(
+            spec.integration.surface,
+            crate::WindowSurface::PerPixelAlpha {
+                hit_test: crate::AlphaHitTest::TransparentPixels
+            }
+        ) {
+            self.per_pixel_hit_test_windows.insert(id);
+        }
         self.windows.insert(id, window);
         Ok(id)
     }

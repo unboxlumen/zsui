@@ -20,6 +20,8 @@ use winit::event_loop::{
     ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy, OwnedDisplayHandle,
 };
 use winit::keyboard::{Key, ModifiersState, NamedKey};
+#[cfg(feature = "desktop-overlay")]
+use winit::platform::x11::{EventLoopBuilderExtX11, WindowAttributesExtX11};
 use winit::raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 use winit::window::{
     Theme as WinitTheme, Window as WinitWindow, WindowAttributes, WindowId as WinitWindowId,
@@ -37,8 +39,8 @@ use crate::{
     Size as ZsSize, TextLayout, TextRun, TextStyle, TextWeight, TextWrap, VerticalAlign,
 };
 use crate::{
-    MenuItemSpec, MenuSpec, NativeDrawPlan, Point, Rect, WindowSpec, ZsAccelerator,
-    ZsAcceleratorKey, ZsIcon, ZsuiError, ZsuiResult,
+    MenuItemSpec, MenuSpec, NativeDrawPlan, Point, Rect, WindowLayer, WindowSpec, WindowSurface,
+    ZsAccelerator, ZsAcceleratorKey, ZsIcon, ZsuiError, ZsuiResult,
 };
 
 type LinuxDisplayHandle = OwnedDisplayHandle;
@@ -87,6 +89,7 @@ type LinuxDirectTextContext = crate::linux_direct_lite::LinuxLiteTextSystem;
 pub(crate) struct LinuxDirectNativeWindowRunReport {
     pub created_window_count: usize,
     pub native_view_capture: Option<Result<crate::NativeViewCaptureEvidence, String>>,
+    pub native_overlay: Option<crate::NativeOverlayEvidence>,
     pub proof_input_reports: Vec<crate::native::NativeViewInputDispatchReport>,
     pub native_window_resize: Option<crate::NativeWindowResizeEvidence>,
     pub native_window_resize_error: Option<String>,
@@ -113,6 +116,7 @@ pub(crate) fn run_linux_direct_native_window_event_loop(
         return Ok(LinuxDirectNativeWindowRunReport {
             created_window_count: 0,
             native_view_capture: None,
+            native_overlay: None,
             proof_input_reports: Vec::new(),
             native_window_resize: None,
             native_window_resize_error: None,
@@ -127,7 +131,15 @@ pub(crate) fn run_linux_direct_native_window_event_loop(
         });
     }
 
-    let event_loop = EventLoop::<LinuxDirectUserEvent>::with_user_event()
+    let mut event_loop_builder = EventLoop::<LinuxDirectUserEvent>::with_user_event();
+    #[cfg(feature = "desktop-overlay")]
+    if specs.iter().any(|spec| spec.integration.layer.is_overlay()) {
+        // Overlay windows require an X11 depth-32 visual and XShape input
+        // regions. On a Wayland session this selects XWayland; the native
+        // layer-shell backend is selected separately when it is compiled in.
+        event_loop_builder.with_x11();
+    }
+    let event_loop = event_loop_builder
         .build()
         .map_err(|error| ZsuiError::host("linux_direct_event_loop", error.to_string()))?;
     let event_proxy = event_loop.create_proxy();
@@ -151,6 +163,7 @@ pub(crate) fn run_linux_direct_native_window_event_loop(
     Ok(LinuxDirectNativeWindowRunReport {
         created_window_count: app.created_window_count,
         native_view_capture: app.capture_result.take(),
+        native_overlay: app.native_overlay_evidence(),
         proof_input_reports: std::mem::take(&mut app.proof_input_reports),
         native_window_resize: app.native_window_resize.take(),
         native_window_resize_error: app.native_window_resize_error.take(),
@@ -203,9 +216,25 @@ struct LinuxDirectApp {
     accessibility_action_count: usize,
     process_memory: Option<crate::NativeProofProcessMemoryEvidence>,
     event_proxy: EventLoopProxy<LinuxDirectUserEvent>,
+    #[cfg(feature = "desktop-overlay")]
+    native_overlay_evidence: Option<crate::NativeOverlayEvidence>,
 }
 
 impl LinuxDirectApp {
+    fn native_overlay_evidence(&self) -> Option<crate::NativeOverlayEvidence> {
+        #[cfg(feature = "desktop-overlay")]
+        {
+            self.windows
+                .values()
+                .find_map(LinuxDirectWindow::overlay_evidence)
+                .or_else(|| self.native_overlay_evidence.clone())
+        }
+        #[cfg(not(feature = "desktop-overlay"))]
+        {
+            None
+        }
+    }
+
     fn new(
         specs: &[WindowSpec],
         draw_plans: &[Option<NativeDrawPlan>],
@@ -251,6 +280,8 @@ impl LinuxDirectApp {
             accessibility_action_count: 0,
             process_memory: None,
             event_proxy,
+            #[cfg(feature = "desktop-overlay")]
+            native_overlay_evidence: None,
         }
     }
 
@@ -268,6 +299,12 @@ impl LinuxDirectApp {
         let mut initial_plans = std::mem::take(&mut self.initial_plans);
         let mut initial_runtimes = std::mem::take(&mut self.initial_runtimes);
         for (index, spec) in specs.into_iter().enumerate() {
+            let overlay = spec.integration.layer.is_overlay();
+            let activate_on_click = match spec.integration.layer {
+                WindowLayer::Overlay { activate_on_click } => activate_on_click,
+                _ => false,
+            };
+            let transparent = spec.transparent || spec.integration.surface != WindowSurface::Opaque;
             let mut attributes = WindowAttributes::default()
                 .with_title(spec.title.clone())
                 .with_inner_size(Size::Logical(LogicalSize::new(
@@ -277,14 +314,24 @@ impl LinuxDirectApp {
                 .with_visible(false)
                 .with_resizable(spec.resizable)
                 .with_decorations(spec.decorations && !spec.custom_title_bar)
-                .with_transparent(spec.transparent);
+                .with_transparent(transparent);
+            if let Some(position) = spec.position {
+                attributes = attributes.with_position(LogicalPosition::new(
+                    position.x().0 as f64,
+                    position.y().0 as f64,
+                ));
+            }
+            #[cfg(feature = "desktop-overlay")]
+            if overlay && !activate_on_click {
+                attributes = attributes.with_override_redirect(true);
+            }
             if let (Some(width), Some(height)) = (spec.min_width, spec.min_height) {
                 attributes = attributes.with_min_inner_size(Size::Logical(LogicalSize::new(
                     width as f64,
                     height as f64,
                 )));
             }
-            if spec.always_on_top {
+            if spec.always_on_top || overlay {
                 attributes = attributes.with_window_level(WindowLevel::AlwaysOnTop);
             }
 
@@ -293,6 +340,33 @@ impl LinuxDirectApp {
                     .create_window(attributes)
                     .map_err(|error| format!("could not create `{}`: {error}", spec.title))?,
             );
+            #[cfg(feature = "desktop-overlay")]
+            let overlay_presenter = if overlay {
+                let hit_test = match spec.integration.surface {
+                    WindowSurface::PerPixelAlpha {
+                        hit_test: crate::AlphaHitTest::TransparentPixels,
+                    } => "transparent_pixels",
+                    WindowSurface::PerPixelAlpha {
+                        hit_test: crate::AlphaHitTest::PassThrough,
+                    } => "pass_through",
+                    _ => "opaque",
+                };
+                Some(
+                    crate::linux_x11_overlay::LinuxX11OverlayPresenter::new(
+                        &window,
+                        activate_on_click,
+                        hit_test,
+                    )
+                    .map_err(|error| {
+                        format!(
+                            "could not create `{}` overlay presenter: {error}",
+                            spec.title
+                        )
+                    })?,
+                )
+            } else {
+                None
+            };
             let surface = SoftBufferSurface::new(
                 self.context
                     .as_ref()
@@ -343,6 +417,8 @@ impl LinuxDirectApp {
                 initial_height,
                 Rc::clone(&window),
                 surface,
+                #[cfg(feature = "desktop-overlay")]
+                overlay_presenter,
                 plan,
                 runtime,
                 text_context,
@@ -625,6 +701,8 @@ impl ApplicationHandler<LinuxDirectUserEvent> for LinuxDirectApp {
                 if self.proof_resize_requested && self.proof_resize_window == Some(window_id) {
                     self.proof_resize_event_count = self.proof_resize_event_count.saturating_add(1);
                 }
+                #[cfg(feature = "native-window-events")]
+                window.dispatch_metrics(event_loop);
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 #[cfg(feature = "native-smoke")]
@@ -639,6 +717,8 @@ impl ApplicationHandler<LinuxDirectUserEvent> for LinuxDirectApp {
                 window.apply_report(report, event_loop);
                 window.resize(window.window.inner_size());
                 window.window.request_redraw();
+                #[cfg(feature = "native-window-events")]
+                window.dispatch_metrics(event_loop);
             }
             WindowEvent::ThemeChanged(theme) => {
                 window.theme = theme;
@@ -649,6 +729,10 @@ impl ApplicationHandler<LinuxDirectUserEvent> for LinuxDirectApp {
                 if let Err(error) = window.redraw() {
                     self.fail(event_loop, "redraw", error);
                     return;
+                }
+                #[cfg(feature = "desktop-overlay")]
+                if let Some(evidence) = window.overlay_evidence() {
+                    self.native_overlay_evidence = Some(evidence);
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -842,7 +926,16 @@ impl ApplicationHandler<LinuxDirectUserEvent> for LinuxDirectApp {
                 }
             }
             #[cfg(feature = "window-chrome")]
-            WindowEvent::Moved(_) => window.last_caption_press = None,
+            WindowEvent::Moved(_) => {
+                window.last_caption_press = None;
+                #[cfg(feature = "native-window-events")]
+                window.dispatch_metrics(event_loop);
+            }
+            #[cfg(not(feature = "window-chrome"))]
+            WindowEvent::Moved(_) => {
+                #[cfg(feature = "native-window-events")]
+                window.dispatch_metrics(event_loop);
+            }
             _ => {}
         }
         if remove_window {
@@ -884,6 +977,8 @@ struct LinuxDirectWindow {
     title: String,
     window: Rc<WinitWindow>,
     surface: LinuxSoftBufferSurface,
+    #[cfg(feature = "desktop-overlay")]
+    overlay: Option<crate::linux_x11_overlay::LinuxX11OverlayPresenter>,
     plan: NativeDrawPlan,
     runtime: crate::native::NativeViewInputRuntime,
     text_context: LinuxDirectTextContext,
@@ -971,6 +1066,63 @@ impl LinuxDirectWindow {
         }
     }
 
+    #[cfg(feature = "desktop-overlay")]
+    fn overlay_evidence(&self) -> Option<crate::NativeOverlayEvidence> {
+        let overlay = self.overlay.as_ref()?;
+        let metrics = self.window_metrics();
+        Some(crate::NativeOverlayEvidence {
+            backend: "linux_x11",
+            layer: "overlay",
+            surface: "per_pixel_alpha",
+            hit_test: overlay.hit_test(),
+            position: metrics.as_ref().map(|metrics| Point {
+                x: metrics.bounds.x,
+                y: metrics.bounds.y,
+            }),
+            work_area: metrics.as_ref().map(|metrics| metrics.work_area),
+            window_depth: Some(overlay.depth()),
+            input_rectangle_count: overlay.input_rectangle_count(),
+            alpha_pixel_count: overlay.alpha_pixel_count(),
+            opaque_pixel_count: overlay.opaque_pixel_count(),
+        })
+    }
+
+    fn window_metrics(&self) -> Option<crate::WindowMetrics> {
+        let position = self.window.outer_position().ok()?;
+        let size = self.window.outer_size();
+        let monitor = self
+            .window
+            .current_monitor()
+            .or_else(|| self.window.primary_monitor())?;
+        let monitor_position = monitor.position();
+        let monitor_size = monitor.size();
+        Some(crate::WindowMetrics {
+            bounds: Rect {
+                x: position.x,
+                y: position.y,
+                width: size.width as i32,
+                height: size.height as i32,
+            },
+            work_area: Rect {
+                x: monitor_position.x,
+                y: monitor_position.y,
+                width: monitor_size.width as i32,
+                height: monitor_size.height as i32,
+            },
+            dpi: (self.scale_factor * 96.0).round().max(96.0) as u32,
+        })
+    }
+
+    #[cfg(feature = "native-window-events")]
+    fn dispatch_metrics(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(metrics) = self.window_metrics() {
+            let report = self
+                .runtime
+                .dispatch_native_window_event(crate::NativeWindowEvent::MetricsChanged(metrics));
+            self.apply_report(report, event_loop);
+        }
+    }
+
     fn new(
         event_loop: &ActiveEventLoop,
         title: String,
@@ -979,6 +1131,9 @@ impl LinuxDirectWindow {
         initial_height: u32,
         window: Rc<WinitWindow>,
         surface: LinuxSoftBufferSurface,
+        #[cfg(feature = "desktop-overlay")] overlay: Option<
+            crate::linux_x11_overlay::LinuxX11OverlayPresenter,
+        >,
         plan: NativeDrawPlan,
         runtime: crate::native::NativeViewInputRuntime,
         text_context: LinuxDirectTextContext,
@@ -1027,6 +1182,8 @@ impl LinuxDirectWindow {
             title,
             window,
             surface,
+            #[cfg(feature = "desktop-overlay")]
+            overlay,
             plan,
             runtime,
             text_context,
@@ -1375,6 +1532,16 @@ impl LinuxDirectWindow {
             }
         }
         drop(dispatch_turn);
+        if let Some(position) = report.window_position_request {
+            self.window
+                .set_outer_position(winit::dpi::LogicalPosition::new(
+                    position.x().0 as f64,
+                    position.y().0 as f64,
+                ));
+            report.redraw_plan = report
+                .redraw_plan
+                .or_else(|| self.runtime.current_composed_draw_plan());
+        }
         #[cfg(feature = "window-chrome")]
         for command in report.window_commands.clone() {
             match command {
@@ -1614,6 +1781,29 @@ impl LinuxDirectWindow {
             .ok_or_else(|| "Linux direct surface width is zero".to_string())?;
         let height = NonZeroU32::new(self.physical_size.height.max(1))
             .ok_or_else(|| "Linux direct surface height is zero".to_string())?;
+        #[cfg(feature = "desktop-overlay")]
+        if let Some(overlay) = self.overlay.as_mut() {
+            overlay.resize(width.get(), height.get());
+            render_linux_direct_frame(
+                overlay.frame_mut(),
+                &self.plan,
+                self.menu_surface.as_ref(),
+                width.get(),
+                height.get(),
+                self.scale_factor,
+                self.theme,
+                &self.draw_text_context,
+                &mut self.icon_cache,
+                true,
+            )?;
+            if self.retain_frame {
+                self.last_frame.clear();
+                self.last_frame.extend_from_slice(overlay.frame());
+            }
+            overlay.present()?;
+            self.presented_once = true;
+            return Ok(());
+        }
         self.surface
             .resize(width, height)
             .map_err(|error| format!("could not resize software surface: {error}"))?;
@@ -1640,6 +1830,7 @@ impl LinuxDirectWindow {
             self.theme,
             &self.draw_text_context,
             &mut self.icon_cache,
+            false,
         )?;
         if self.retain_frame {
             self.last_frame.clear();
@@ -1660,15 +1851,33 @@ impl LinuxDirectWindow {
         if self.last_frame.is_empty() {
             return Err("the Linux direct host has not presented a frame".to_string());
         }
+        #[cfg(feature = "desktop-overlay")]
+        let rgba = self.overlay.is_some();
+        #[cfg(not(feature = "desktop-overlay"))]
+        let rgba = false;
         write_linux_direct_png(
             path,
             self.physical_size.width,
             self.physical_size.height,
             &self.last_frame,
+            rgba,
         )?;
         let logical = self.physical_size.to_logical::<f64>(self.scale_factor);
         #[cfg(feature = "linux-direct")]
-        let backend = "winit_softbuffer_pango_cairo";
+        let backend = {
+            #[cfg(feature = "desktop-overlay")]
+            {
+                if self.overlay.is_some() {
+                    "winit_x11_argb_pango_cairo"
+                } else {
+                    "winit_softbuffer_pango_cairo"
+                }
+            }
+            #[cfg(not(feature = "desktop-overlay"))]
+            {
+                "winit_softbuffer_pango_cairo"
+            }
+        };
         #[cfg(all(feature = "linux-direct-lite", not(feature = "linux-direct")))]
         let backend = LINUX_DIRECT_LITE_CAPTURE_BACKEND;
         #[cfg(feature = "linux-direct")]
@@ -1832,6 +2041,46 @@ struct LinuxIconRaster {
     premultiplied_bgra: Vec<u8>,
 }
 
+/// Shared Cairo/Pango renderer for overlay hosts that do not use softbuffer.
+#[cfg(feature = "linux-direct")]
+pub(crate) struct LinuxDirectOverlayRenderer {
+    text_context: LinuxDirectTextContext,
+    icon_cache: HashMap<(ZsIcon, u32, Option<u32>), LinuxIconRaster>,
+}
+
+#[cfg(feature = "linux-direct")]
+impl LinuxDirectOverlayRenderer {
+    pub(crate) fn new() -> Self {
+        Self {
+            text_context: linux_direct_text_context(),
+            icon_cache: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn render(
+        &mut self,
+        frame: &mut [u32],
+        plan: &NativeDrawPlan,
+        width: u32,
+        height: u32,
+        scale_factor: f64,
+        theme: WinitTheme,
+    ) -> Result<(), String> {
+        render_linux_direct_frame(
+            frame,
+            plan,
+            None,
+            width,
+            height,
+            scale_factor,
+            theme,
+            &self.text_context,
+            &mut self.icon_cache,
+            true,
+        )
+    }
+}
+
 #[cfg(all(feature = "linux-direct-lite", not(feature = "linux-direct")))]
 fn render_linux_direct_frame(
     frame: &mut [u32],
@@ -1843,7 +2092,14 @@ fn render_linux_direct_frame(
     theme: WinitTheme,
     text_context: &LinuxDirectTextContext,
     _icon_cache: &mut HashMap<(ZsIcon, u32, Option<u32>), LinuxIconRaster>,
+    transparent: bool,
 ) -> Result<(), String> {
+    if transparent {
+        return Err(
+            "per-pixel-alpha overlay windows require the Cairo/Pango linux-direct renderer"
+                .to_string(),
+        );
+    }
     crate::linux_direct_lite::render_linux_direct_lite_frame(
         frame,
         plan,
@@ -1867,6 +2123,7 @@ fn render_linux_direct_frame(
     theme: WinitTheme,
     pango_context: &pango::Context,
     icon_cache: &mut HashMap<(ZsIcon, u32, Option<u32>), LinuxIconRaster>,
+    transparent: bool,
 ) -> Result<(), String> {
     let width_i32 = i32::try_from(width).map_err(|_| "frame width exceeds i32".to_string())?;
     let height_i32 = i32::try_from(height).map_err(|_| "frame height exceeds i32".to_string())?;
@@ -1879,22 +2136,30 @@ fn render_linux_direct_frame(
             frame.len()
         ));
     }
-    let stride = Format::Rgb24
+    let format = if transparent {
+        Format::ARgb32
+    } else {
+        Format::Rgb24
+    };
+    if transparent {
+        frame.fill(0);
+    }
+    let stride = format
         .stride_for_width(width)
         .map_err(|error| format!("could not compute Cairo image stride: {error}"))?;
     if usize::try_from(stride).ok() != Some(width as usize * std::mem::size_of::<u32>()) {
         return Err(format!(
-            "Cairo RGB24 stride {stride} does not match the software buffer width {width}"
+            "Cairo stride {stride} does not match the software buffer width {width}"
         ));
     }
-    // SAFETY: `frame` owns `width * height` native-endian RGB24 pixels and
-    // remains borrowed for the complete lifetime of `image`. All Cairo state
-    // and the image surface are dropped before this function returns, so no
-    // Cairo reference can outlive the softbuffer guard that supplied the slice.
+    // SAFETY: `frame` owns `width * height` native-endian pixels and remains
+    // borrowed for the complete lifetime of `image`. All Cairo state and the
+    // image surface are dropped before this function returns, so no Cairo
+    // reference can outlive the caller's buffer.
     let image = unsafe {
         ImageSurface::create_for_data_unsafe(
             frame.as_mut_ptr().cast::<u8>(),
-            Format::Rgb24,
+            format,
             width_i32,
             height_i32,
             stride,
@@ -1904,10 +2169,12 @@ fn render_linux_direct_frame(
     let context = CairoContext::new(&image)
         .map_err(|error| format!("could not create Cairo drawing context: {error}"))?;
     let palette = NativeDrawPalette::for_mode(plan.theme_mode, matches!(theme, WinitTheme::Dark));
-    set_cairo_source(&context, palette.surface);
-    context
-        .paint()
-        .map_err(|error| format!("could not clear Cairo image surface: {error}"))?;
+    if !transparent {
+        set_cairo_source(&context, palette.surface);
+        context
+            .paint()
+            .map_err(|error| format!("could not clear Cairo image surface: {error}"))?;
+    }
     context.scale(scale_factor, scale_factor);
     let draw_context = pango_context.clone();
     pangocairo::functions::update_context(&context, &draw_context);
@@ -2853,6 +3120,7 @@ fn write_linux_direct_png(
     width: u32,
     height: u32,
     frame: &[u32],
+    rgba: bool,
 ) -> Result<(), String> {
     if let Some(parent) = path
         .parent()
@@ -2865,21 +3133,33 @@ fn write_linux_direct_png(
         .map_err(|error| format!("could not create Linux capture file: {error}"))?;
     let writer = std::io::BufWriter::new(file);
     let mut encoder = png::Encoder::new(writer, width, height);
-    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_color(if rgba {
+        png::ColorType::Rgba
+    } else {
+        png::ColorType::Rgb
+    });
     encoder.set_depth(png::BitDepth::Eight);
     let mut writer = encoder
         .write_header()
         .map_err(|error| format!("could not write Linux capture header: {error}"))?;
-    let mut rgb = Vec::with_capacity(frame.len() * 3);
+    let mut pixels = Vec::with_capacity(frame.len() * if rgba { 4 } else { 3 });
     for pixel in frame {
-        rgb.extend_from_slice(&[
-            ((pixel >> 16) & 0xff) as u8,
-            ((pixel >> 8) & 0xff) as u8,
-            (pixel & 0xff) as u8,
-        ]);
+        let alpha = (pixel >> 24) as u8;
+        let mut red = ((pixel >> 16) & 0xff) as u8;
+        let mut green = ((pixel >> 8) & 0xff) as u8;
+        let mut blue = (pixel & 0xff) as u8;
+        if rgba && alpha > 0 && alpha < 0xff {
+            red = ((u32::from(red) * 255) / u32::from(alpha)).min(255) as u8;
+            green = ((u32::from(green) * 255) / u32::from(alpha)).min(255) as u8;
+            blue = ((u32::from(blue) * 255) / u32::from(alpha)).min(255) as u8;
+        }
+        pixels.extend_from_slice(&[red, green, blue]);
+        if rgba {
+            pixels.push(alpha);
+        }
     }
     writer
-        .write_image_data(&rgb)
+        .write_image_data(&pixels)
         .map_err(|error| format!("could not write Linux capture pixels: {error}"))
 }
 
@@ -2889,6 +3169,7 @@ fn write_linux_direct_png(
     _width: u32,
     _height: u32,
     _frame: &[u32],
+    _rgba: bool,
 ) -> Result<(), String> {
     Err("enable the image feature to capture a Linux native PNG".to_string())
 }

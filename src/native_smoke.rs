@@ -1471,6 +1471,7 @@ mod tests {
             screenshot_captured: false,
             screenshot_error: None,
             native_view_capture: None,
+            native_overlay: None,
             native_window_resize_required: false,
             native_window_resize: None,
             native_window_resize_error: None,

@@ -1,6 +1,6 @@
 use crate::{
     AppEvent, Command, HostCapabilities, MenuItemSpec, MenuSpec, Point, SettingsPageSpec,
-    SettingsValue, Size, TraySpec, UiCommand, UiRect, WindowSpec,
+    SettingsValue, Size, TraySpec, UiCommand, UiRect, WindowLayer, WindowPosition, WindowSpec,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -75,6 +75,7 @@ pub struct NativeMainWindowRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeWindowOptions {
+    pub position: Option<WindowPosition>,
     pub min_size: Option<Size>,
     pub resizable: bool,
     pub decorations: bool,
@@ -82,28 +83,34 @@ pub struct NativeWindowOptions {
     pub custom_title_bar: bool,
     pub always_on_top: bool,
     pub transparent: bool,
+    /// Stacking and activation policy requested by the application.
+    pub layer: WindowLayer,
 }
 
 impl NativeWindowOptions {
     pub const fn standard() -> Self {
         Self {
+            position: None,
             min_size: None,
             resizable: true,
             decorations: true,
             custom_title_bar: false,
             always_on_top: false,
             transparent: false,
+            layer: WindowLayer::Normal,
         }
     }
 
     pub const fn tool_window() -> Self {
         Self {
+            position: None,
             min_size: None,
             resizable: false,
             decorations: false,
             custom_title_bar: false,
             always_on_top: true,
             transparent: false,
+            layer: WindowLayer::Normal,
         }
     }
 
@@ -115,13 +122,25 @@ impl NativeWindowOptions {
         transparent: bool,
     ) -> Self {
         Self {
+            position: None,
             min_size,
             resizable,
             decorations,
             custom_title_bar: false,
             always_on_top,
             transparent,
+            layer: WindowLayer::Normal,
         }
+    }
+
+    pub const fn with_position(mut self, position: WindowPosition) -> Self {
+        self.position = Some(position);
+        self
+    }
+
+    pub const fn with_layer(mut self, layer: WindowLayer) -> Self {
+        self.layer = layer;
+        self
     }
 
     pub const fn with_min_size(mut self, size: Size) -> Self {
@@ -143,12 +162,14 @@ impl NativeWindowOptions {
             _ => None,
         };
         Self {
+            position: window.position,
             min_size,
             resizable: window.resizable,
             decorations: window.decorations,
             custom_title_bar: window.custom_title_bar && window.decorations,
             always_on_top: window.always_on_top,
             transparent: window.transparent,
+            layer: window.integration.layer,
         }
     }
 

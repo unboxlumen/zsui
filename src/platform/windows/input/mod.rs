@@ -21,6 +21,7 @@ pub struct WindowsWin32ViewInputRoute {
     /// painter, so both use one text engine.
     text_resources: WindowsGdiResourceCache,
     quit_requested: bool,
+    pending_window_position: Option<crate::WindowPosition>,
     #[cfg(feature = "window-chrome")]
     pending_window_commands: Vec<crate::ZsWindowCommand>,
     close_approved: bool,
@@ -161,6 +162,7 @@ impl WindowsWin32ViewInputRoute {
             pending_draw_plan: None,
             text_resources,
             quit_requested: false,
+            pending_window_position: None,
             #[cfg(feature = "window-chrome")]
             pending_window_commands: Vec::new(),
             close_approved: false,
@@ -1366,6 +1368,7 @@ fn dispatch_windows_win32_window_view_input_with_quit_policy(
     let hwnd_value = hwnd as isize;
     #[cfg(feature = "window-chrome")]
     let mut window_commands: Vec<crate::ZsWindowCommand>;
+    let mut window_position: Option<crate::WindowPosition> = None;
     let (
         mut report,
         mut draw_plan,
@@ -1382,6 +1385,7 @@ fn dispatch_windows_win32_window_view_input_with_quit_policy(
             .expect("window view input route registry should not be poisoned");
         let record = routes.iter_mut().find(|record| record.hwnd == hwnd_value)?;
         let report = dispatch(&mut record.route);
+        window_position = record.route.take_pending_window_position();
         let draw_plan = record.route.take_pending_draw_plan();
         let quit_requested = record.route.take_quit_requested();
         #[cfg(feature = "window-chrome")]
@@ -1457,6 +1461,9 @@ fn dispatch_windows_win32_window_view_input_with_quit_policy(
                 break;
             };
             report.merge(record.route.dispatch_app_effect_outcome(request, outcome));
+            if let Some(position) = record.route.take_pending_window_position() {
+                window_position = Some(position);
+            }
             quit_requested |= record.route.take_quit_requested();
             if let Some(plan) = record.route.take_pending_draw_plan() {
                 draw_plan = Some(plan);
@@ -1484,6 +1491,9 @@ fn dispatch_windows_win32_window_view_input_with_quit_policy(
         }
         #[cfg(feature = "window-chrome")]
         window_commands.extend(record.route.take_pending_window_commands());
+        if let Some(position) = record.route.take_pending_window_position() {
+            window_position = Some(position);
+        }
         poll_interval_ms = record.route.background_poll_interval_ms();
         record.report.merge(report.clone());
     }
@@ -1499,11 +1509,34 @@ fn dispatch_windows_win32_window_view_input_with_quit_policy(
     }
     #[cfg(feature = "window-chrome")]
     post_windows_win32_window_commands(hwnd, &window_commands);
+    if let Some(position) = window_position {
+        apply_windows_win32_window_position(hwnd, position);
+    }
     if let Some(services) = window_services(hwnd) {
         services.sync_native_focus();
     }
     sync_windows_win32_live_view_poll_timer(hwnd, poll_interval_ms);
     Some(report)
+}
+
+fn apply_windows_win32_window_position(hwnd: HWND, position: crate::WindowPosition) {
+    if unsafe { IsWindow(hwnd) } == 0 {
+        return;
+    }
+    let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96) as f32 / 96.0;
+    let x = (position.x().0 * dpi).round() as i32;
+    let y = (position.y().0 * dpi).round() as i32;
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            null_mut(),
+            x,
+            y,
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+    }
 }
 
 /// Posts View window commands as system commands, so they animate, respect

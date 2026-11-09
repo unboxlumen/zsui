@@ -93,6 +93,9 @@ pub struct HostCapabilities {
     pub window_decorations: CapabilitySupport,
     pub window_always_on_top: CapabilitySupport,
     pub window_transparency: CapabilitySupport,
+    pub window_positioning: CapabilitySupport,
+    pub window_overlay: CapabilitySupport,
+    pub window_metrics: CapabilitySupport,
     pub tray_or_status_menu: CapabilitySupport,
     pub menus: CapabilitySupport,
     pub global_hotkeys: CapabilitySupport,
@@ -118,6 +121,11 @@ impl HostCapabilities {
             ),
             window_always_on_top: CapabilitySupport::supported("always-on-top windows are honored"),
             window_transparency: CapabilitySupport::supported("transparent windows are honored"),
+            window_positioning: CapabilitySupport::supported("window positions are honored"),
+            window_overlay: CapabilitySupport::supported("overlay windows are honored"),
+            window_metrics: CapabilitySupport::supported(
+                "window bounds and work areas are reported",
+            ),
             tray_or_status_menu: CapabilitySupport::supported(
                 "tray/status menu declarations are accepted",
             ),
@@ -142,6 +150,9 @@ impl HostCapabilities {
             window_decorations: unsupported.clone(),
             window_always_on_top: unsupported.clone(),
             window_transparency: unsupported.clone(),
+            window_positioning: unsupported.clone(),
+            window_overlay: unsupported.clone(),
+            window_metrics: unsupported.clone(),
             tray_or_status_menu: unsupported.clone(),
             menus: unsupported.clone(),
             global_hotkeys: unsupported.clone(),
@@ -170,6 +181,9 @@ impl HostCapabilities {
             ("window_decorations", &self.window_decorations),
             ("window_always_on_top", &self.window_always_on_top),
             ("window_transparency", &self.window_transparency),
+            ("window_positioning", &self.window_positioning),
+            ("window_overlay", &self.window_overlay),
+            ("window_metrics", &self.window_metrics),
             ("tray_or_status_menu", &self.tray_or_status_menu),
             ("menus", &self.menus),
             ("global_hotkeys", &self.global_hotkeys),
@@ -203,6 +217,15 @@ impl HostCapabilities {
             ),
             window_transparency: CapabilitySupport::partial(
                 "Win32 transparency exists for selected hosts; ZsuiHost mapping is not wired yet",
+            ),
+            window_positioning: CapabilitySupport::partial(
+                "Win32 SetWindowPos is available; ZsuiHost position mapping is not wired yet",
+            ),
+            window_overlay: CapabilitySupport::unsupported(
+                "enable desktop-overlay for Win32 layered overlay windows",
+            ),
+            window_metrics: CapabilitySupport::partial(
+                "Win32 monitor work areas exist; ZsuiHost metrics are not wired yet",
             ),
             tray_or_status_menu: CapabilitySupport::partial(
                 "Win32 tray/status APIs exist; generic PlatformHost currently records declarations",
@@ -246,6 +269,21 @@ impl HostCapabilities {
         {
             capabilities.window_transparency = CapabilitySupport::supported("Win32 per-pixel alpha surfaces use premultiplied Direct2D DIBs and UpdateLayeredWindow");
         }
+        capabilities.window_positioning = CapabilitySupport::partial(
+            "Win32 SetWindowPos and monitor work areas are connected; target proof is pending external validation",
+        );
+        capabilities.window_overlay = CapabilitySupport::unsupported(
+            "enable desktop-overlay for Win32 layered overlay windows",
+        );
+        #[cfg(all(windows, feature = "desktop-overlay"))]
+        {
+            capabilities.window_overlay = CapabilitySupport::partial(
+                "Win32 layered overlay windows map topmost, tool-window and no-activate styles; target proof is pending external validation",
+            );
+        }
+        capabilities.window_metrics = CapabilitySupport::partial(
+            "Win32 position requests are connected; MetricsChanged event wiring and target proof are pending external validation",
+        );
         capabilities.tray_or_status_menu = CapabilitySupport::partial(
             "Win32 status items, right-click callbacks, typed popup-menu commands and Explorer restart recovery are connected; target user-selection proof is still pending",
         );
@@ -292,6 +330,15 @@ impl HostCapabilities {
             window_transparency: CapabilitySupport::unsupported(
                 "transparent AppKit windows are not connected",
             ),
+            window_positioning: CapabilitySupport::partial(
+                "AppKit frame positioning is available; the ZSUI host is not wired yet",
+            ),
+            window_overlay: CapabilitySupport::unsupported(
+                "enable desktop-overlay for AppKit overlay panels",
+            ),
+            window_metrics: CapabilitySupport::partial(
+                "AppKit screen frames are available; the ZSUI host is not wired yet",
+            ),
             tray_or_status_menu: CapabilitySupport::unsupported("NSStatusItem is not connected"),
             menus: CapabilitySupport::unsupported("NSMenu is not connected"),
             global_hotkeys: CapabilitySupport::unsupported(
@@ -327,6 +374,26 @@ impl HostCapabilities {
             );
             capabilities.window_always_on_top = CapabilitySupport::partial(
                 "NSFloatingWindowLevel is connected; target interaction proof is pending",
+            );
+            capabilities.window_positioning = CapabilitySupport::partial(
+                "AppKit frame positioning and screen work areas are connected; target proof is pending external validation",
+            );
+            capabilities.window_transparency = CapabilitySupport::unsupported(
+                "enable desktop-overlay for transparent AppKit overlay panels",
+            );
+            capabilities.window_overlay =
+                CapabilitySupport::unsupported("enable desktop-overlay for AppKit overlay panels");
+            #[cfg(feature = "desktop-overlay")]
+            {
+                capabilities.window_transparency = CapabilitySupport::partial(
+                    "transparent NSPanel/NSWindow surfaces and alpha hit testing are connected; target proof is pending external validation",
+                );
+                capabilities.window_overlay = CapabilitySupport::partial(
+                    "borderless floating overlay panels with non-activating behavior are connected; target proof is pending external validation",
+                );
+            }
+            capabilities.window_metrics = CapabilitySupport::partial(
+                "AppKit position requests are connected; MetricsChanged event wiring and target proof are pending external validation",
             );
             capabilities.tray_or_status_menu = CapabilitySupport::partial(
                 "NSStatusItem and detached NSMenu resources are RAII-owned and command-routed by the AppKit event loop; fixed macOS 15 runtime smoke passed, while manual menu-bar interaction remains a release gate",
@@ -398,6 +465,15 @@ impl HostCapabilities {
             window_transparency: CapabilitySupport::unsupported(
                 "transparent GTK4 windows are not connected",
             ),
+            window_positioning: CapabilitySupport::unsupported(
+                "GTK4 has no portable window move/position API",
+            ),
+            window_overlay: CapabilitySupport::unsupported(
+                "GTK4 overlay windows are not supported by the compatibility host",
+            ),
+            window_metrics: CapabilitySupport::unsupported(
+                "GTK4 work-area metrics are not connected",
+            ),
             tray_or_status_menu: CapabilitySupport::unsupported(
                 "a Linux status-item service is not connected",
             ),
@@ -439,6 +515,21 @@ impl HostCapabilities {
             capabilities.window_transparency = CapabilitySupport::partial(
                 "transparent surface declarations are connected; Wayland/X11 compositor proof is pending",
             );
+            capabilities.window_positioning = CapabilitySupport::partial(
+                "X11/XWayland window positions and layer-shell margins are connected; target proof is pending",
+            );
+            capabilities.window_overlay = CapabilitySupport::unsupported(
+                "enable desktop-overlay for Linux X11/XWayland ARGB overlay windows",
+            );
+            #[cfg(all(feature = "desktop-overlay", feature = "linux-direct"))]
+            {
+                capabilities.window_overlay = CapabilitySupport::partial(
+                    "X11/XWayland ARGB overlays and overlay-only Wayland layer-shell surfaces are connected; target proof is pending",
+                );
+            }
+            capabilities.window_metrics = CapabilitySupport::partial(
+                "X11 monitor geometry and layer-shell output metrics are connected; target proof is pending",
+            );
         } else if cfg!(feature = "linux-gtk") {
             capabilities.windows = CapabilitySupport::partial(
                 "GtkApplication/ApplicationWindow lifecycle, draw-plan rendering, typed input, semantic focus rings and allocation relayout are connected; target proof is pending",
@@ -448,6 +539,14 @@ impl HostCapabilities {
             );
             capabilities.window_decorations = CapabilitySupport::partial(
                 "GTK4 decorated and undecorated window declarations are connected; compositor proof is pending",
+            );
+            capabilities.window_positioning =
+                CapabilitySupport::unsupported("GTK4 has no portable window move/position API");
+            capabilities.window_overlay = CapabilitySupport::unsupported(
+                "the GTK4 compatibility host does not implement overlay windows",
+            );
+            capabilities.window_metrics = CapabilitySupport::unsupported(
+                "the GTK4 compatibility host does not expose work-area metrics",
             );
         }
         capabilities.clipboard_text = if cfg!(all(
@@ -544,6 +643,15 @@ impl HostCapabilities {
             ),
             window_transparency: CapabilitySupport::partial(
                 "transparent Activity surfaces depend on theme and compositor support",
+            ),
+            window_positioning: CapabilitySupport::unsupported(
+                "Android app windows are positioned by the system activity",
+            ),
+            window_overlay: CapabilitySupport::unsupported(
+                "Android overlays require special permissions and are not normal app windows",
+            ),
+            window_metrics: CapabilitySupport::partial(
+                "Android window metrics depend on the Activity host",
             ),
             tray_or_status_menu: CapabilitySupport::unsupported(
                 "Android has notifications/quick settings instead of a desktop tray",

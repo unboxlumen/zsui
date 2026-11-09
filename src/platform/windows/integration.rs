@@ -165,10 +165,17 @@ impl WindowsWindowServices {
             ));
         }
         #[cfg(not(feature = "desktop-layer"))]
-        if spec.integration.layer != crate::WindowLayer::Normal {
+        if matches!(spec.integration.layer, crate::WindowLayer::Desktop { .. }) {
             return Err(ZsuiError::unsupported(
                 "desktop_layer",
                 "enable desktop-layer",
+            ));
+        }
+        #[cfg(not(feature = "desktop-overlay"))]
+        if spec.integration.layer.is_overlay() {
+            return Err(ZsuiError::unsupported(
+                "desktop_overlay",
+                "enable desktop-overlay",
             ));
         }
         #[cfg(not(feature = "windows-direct2d"))]

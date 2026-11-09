@@ -130,6 +130,17 @@ pub fn windows_win32_main_window_style_plan(
     if options.always_on_top {
         ex_style |= WS_EX_TOPMOST;
     }
+    if options.layer.is_overlay() {
+        ex_style |= WS_EX_TOOLWINDOW | WS_EX_TOPMOST;
+        if matches!(
+            options.layer,
+            crate::WindowLayer::Overlay {
+                activate_on_click: false
+            }
+        ) {
+            ex_style |= WS_EX_NOACTIVATE;
+        }
+    }
     if matches!(role, WindowsWindowRole::Quick) {
         ex_style |= WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE;
     }
@@ -306,6 +317,12 @@ pub fn create_owned_windows_for_specs_with_routes(
                         ShowWindow(
                             created.main,
                             if matches!(spec.integration.layer, crate::WindowLayer::Desktop { .. })
+                                || matches!(
+                                    spec.integration.layer,
+                                    crate::WindowLayer::Overlay {
+                                        activate_on_click: false
+                                    }
+                                )
                             {
                                 SW_SHOWNOACTIVATE
                             } else {

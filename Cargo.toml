@@ -46,7 +46,7 @@ block2 = { version = "0.6", optional = true }
 dispatch2 = { version = "0.3", optional = true }
 libc = { version = "0.2", optional = true }
 objc2 = { version = "0.6", optional = true }
-objc2-app-kit = { version = "0.3", optional = true, default-features = false, features = ["std", "block2", "objc2-core-foundation", "NSAlert", "NSAppearance", "NSApplication", "NSAttributedString", "NSBezierPath", "NSBitmapImageRep", "NSButton", "NSCell", "NSColor", "NSColorSpace", "NSControl", "NSCursor", "NSEvent", "NSFont", "NSFontDescriptor", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSMenu", "NSMenuItem", "NSOpenPanel", "NSParagraphStyle", "NSPasteboard", "NSRunningApplication", "NSSavePanel", "NSPanel", "NSResponder", "NSStatusBar", "NSStatusItem", "NSStringDrawing", "NSText", "NSTextInputClient", "NSTextInputContext", "NSTrackingArea", "NSView", "NSWindow"] }
+objc2-app-kit = { version = "0.3", optional = true, default-features = false, features = ["std", "block2", "objc2-core-foundation", "NSAlert", "NSAppearance", "NSApplication", "NSAttributedString", "NSBezierPath", "NSBitmapImageRep", "NSButton", "NSCell", "NSColor", "NSColorSpace", "NSControl", "NSCursor", "NSEvent", "NSFont", "NSFontDescriptor", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSMenu", "NSMenuItem", "NSOpenPanel", "NSParagraphStyle", "NSPasteboard", "NSRunningApplication", "NSSavePanel", "NSScreen", "NSPanel", "NSResponder", "NSStatusBar", "NSStatusItem", "NSStringDrawing", "NSText", "NSTextInputClient", "NSTextInputContext", "NSTrackingArea", "NSView", "NSWindow"] }
 objc2-core-graphics = { version = "0.3", optional = true, default-features = false, features = ["std", "CGContext", "CGGeometry", "CGImage", "CGWindow"] }
 objc2-foundation = { version = "0.3", optional = true }
 
@@ -62,6 +62,8 @@ pangocairo = { version = "0.22", optional = true }
 dbus = { version = "0.9", optional = true }
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"], optional = true }
 softbuffer = { version = "0.4.8", default-features = false, features = ["wayland", "wayland-dlopen", "x11", "x11-dlopen"], optional = true }
+smithay-client-toolkit = { version = "0.19", optional = true }
+x11rb = { version = "0.13", features = ["shape"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", optional = true, features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_System_ProcessStatus", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_UI_Controls", "Win32_UI_Controls_Dialogs", "Win32_UI_HiDpi", "Win32_UI_Input_Ime", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
@@ -104,6 +106,8 @@ window-chrome = ["widgets-base", "native-window-events"]
 native-host = ["widgets-base", "native-window-events"]
 window-surface = ["windows-direct2d"]
 desktop-layer = ["native-window-events"]
+desktop-overlay = ["window-surface", "native-window-events", "dep:x11rb"]
+linux-wayland-layer = ["desktop-overlay", "linux-direct", "dep:smithay-client-toolkit"]
 windows-shell = ["native-host", "windows-win32", "windows-sys/Win32_System_DataExchange", "dep:windows", "dep:windows-core", "windows/Win32_UI_Shell", "windows/Win32_UI_Shell_Common", "windows/Win32_UI_WindowsAndMessaging", "windows/Win32_System_Memory", "windows/Win32_System_Com_StructuredStorage", "windows/Win32_System_SystemServices", "windows/Win32_Graphics_Gdi"]
 windows-direct2d = ["windows-win32", "dep:windows", "dep:windows-core", "dep:windows-numerics", "windows/Win32_Graphics_Direct2D", "windows/Win32_Graphics_Direct2D_Common", "windows/Win32_Graphics_Dxgi_Common", "windows/Win32_Graphics_Gdi"]
 password-box = ["text-input-core", "dep:zeroize"]
@@ -179,6 +183,7 @@ full = [
     "native-host",
     "window-surface",
     "desktop-layer",
+    "desktop-overlay",
     "windows-shell",
     "windows-direct2d",
     "accessibility",

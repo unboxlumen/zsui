@@ -1351,6 +1351,7 @@ pub struct AppCx {
     text_edit_commands: Vec<ZsTextEditCommandRequest>,
     quit_requested: bool,
     focus_request: Option<WidgetId>,
+    window_position_request: Option<crate::WindowPosition>,
     #[cfg(feature = "window-chrome")]
     window_commands: Vec<crate::ZsWindowCommand>,
 }
@@ -1677,6 +1678,17 @@ impl AppCx {
 
     pub const fn focus_request(&self) -> Option<WidgetId> {
         self.focus_request
+    }
+
+    /// Moves this window to a logical virtual-desktop position after the
+    /// current update finishes. The last request of an update wins.
+    pub fn move_window_to(&mut self, position: crate::WindowPosition) {
+        self.window_position_request = Some(position);
+    }
+
+    /// The pending window position request, if any.
+    pub const fn window_position_request(&self) -> Option<crate::WindowPosition> {
+        self.window_position_request
     }
 
     /// Asks the host to minimize, maximize/restore or close this window,

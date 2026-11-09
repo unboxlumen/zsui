@@ -22,7 +22,7 @@ pub use window_integration::{
     AlphaHitTest, IntegratedTitleBar, WindowBackdrop, WindowIntegration, WindowLayer,
     WindowRenderer, WindowSurface,
 };
-pub use window_integration::{CaptionMetrics, NativeWindowEvent};
+pub use window_integration::{CaptionMetrics, NativeWindowEvent, WindowMetrics};
 #[cfg(feature = "native-host")]
 pub mod native_host;
 #[cfg(feature = "native-host")]
@@ -175,6 +175,21 @@ mod linux_gtk_renderer;
 #[cfg(all(target_os = "linux", not(target_env = "ohos"), feature = "linux-gtk"))]
 #[doc(hidden)]
 pub mod linux_gtk_services;
+#[cfg(all(
+    target_os = "linux",
+    not(target_env = "ohos"),
+    feature = "linux-wayland-layer"
+))]
+#[path = "platform/linux/wayland_layer.rs"]
+mod linux_wayland_layer;
+#[cfg(all(
+    target_os = "linux",
+    not(target_env = "ohos"),
+    feature = "linux-direct-host",
+    feature = "desktop-overlay"
+))]
+#[path = "platform/linux/x11_overlay.rs"]
+mod linux_x11_overlay;
 #[cfg(feature = "localization")]
 #[doc(hidden)]
 pub mod localization;
@@ -676,12 +691,13 @@ pub use mobile_host::{
 #[doc(hidden)]
 pub use native::{
     native_window, run_native_window, run_native_window_smoke, typed_native_window,
-    NativeTextInputScriptEvidence, NativeTextNavigationEvidence, NativeViewCaptureEvidence,
-    NativeViewKey, NativeViewSmokeInput, NativeWindowBuilder, NativeWindowContentMissing,
-    NativeWindowContentReady, NativeWindowHost, NativeWindowResizeEvidence,
-    NativeWindowResourcePolicy, NativeWindowRuntimeDriver, NativeWindowRuntimeDriverReport,
-    NativeWindowRuntimeHandle, NativeWindowSmokeRunOptions, NativeWindowSmokeRunReport,
-    TypedNativeWindowBuilder, UiInvalidationHandle, ZsPointerButton, ZsPointerModifiers,
+    NativeOverlayEvidence, NativeTextInputScriptEvidence, NativeTextNavigationEvidence,
+    NativeViewCaptureEvidence, NativeViewKey, NativeViewSmokeInput, NativeWindowBuilder,
+    NativeWindowContentMissing, NativeWindowContentReady, NativeWindowHost,
+    NativeWindowResizeEvidence, NativeWindowResourcePolicy, NativeWindowRuntimeDriver,
+    NativeWindowRuntimeDriverReport, NativeWindowRuntimeHandle, NativeWindowSmokeRunOptions,
+    NativeWindowSmokeRunReport, TypedNativeWindowBuilder, UiInvalidationHandle, ZsPointerButton,
+    ZsPointerModifiers,
 };
 #[doc(hidden)]
 pub use native_adapter_manifest::{
@@ -1268,7 +1284,7 @@ pub use widget_render::{
     ZsProgressBarSegmentMetrics,
 };
 #[doc(hidden)]
-pub use window::{Window, WindowNativeOptions, WindowResolvedSpec, WindowSpec};
+pub use window::{Window, WindowNativeOptions, WindowPosition, WindowResolvedSpec, WindowSpec};
 #[cfg(feature = "window-chrome")]
 pub use window_chrome::{ZsWindowCommand, ZsWindowState};
 #[cfg(all(windows, feature = "windows-gdi"))]
@@ -1439,7 +1455,19 @@ mod tests {
         assert_eq!(macos.window_always_on_top.status, CapabilityStatus::Partial);
         assert_eq!(
             macos.window_transparency.status,
-            CapabilityStatus::Unsupported
+            if cfg!(feature = "desktop-overlay") {
+                CapabilityStatus::Partial
+            } else {
+                CapabilityStatus::Unsupported
+            }
+        );
+        assert_eq!(
+            macos.window_overlay.status,
+            if cfg!(feature = "desktop-overlay") {
+                CapabilityStatus::Partial
+            } else {
+                CapabilityStatus::Unsupported
+            }
         );
         assert_eq!(
             macos.menus.status,
@@ -1533,7 +1561,10 @@ mod tests {
             windows_transparent.effective.transparent,
             cfg!(all(windows, feature = "window-surface"))
         );
-        assert!(!macos_transparent.effective.transparent);
+        assert_eq!(
+            macos_transparent.effective.transparent,
+            cfg!(feature = "desktop-overlay")
+        );
         assert_eq!(
             linux_transparent.effective.transparent,
             cfg!(feature = "linux-direct-host")
