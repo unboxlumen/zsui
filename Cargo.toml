@@ -238,6 +238,11 @@ path = "examples/stable_api.rs"
 required-features = ["window", "button", "label"]
 
 [[example]]
+name = "desktop_pet"
+path = "examples/desktop_pet.rs"
+required-features = ["window", "canvas", "desktop-overlay"]
+
+[[example]]
 name = "compact_service_panel"
 path = "examples/compact_service_panel.rs"
 required-features = ["window", "button", "label", "toggle"]

@@ -1649,6 +1649,36 @@ jobs:
             --no-default-features \
             --features linux-direct,native-smoke
 
+      - name: Build and run X11 desktop overlay proof
+        run: |
+          root=target/native-proof/ubuntu-24.04-x86_64/desktop-overlay
+          mkdir -p "$root"
+          cargo build \
+            --release \
+            --locked \
+            --example desktop_pet \
+            --no-default-features \
+            --features window,canvas,desktop-overlay,native-smoke
+          xvfb-run -a --server-args="-screen 0 1280x1024x24+32" \
+            ./target/release/examples/desktop_pet --smoke "$root"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path("target/native-proof/ubuntu-24.04-x86_64/desktop-overlay")
+          report = json.loads((root / "desktop-pet.json").read_text(encoding="utf-8"))
+          overlay = report["native_overlay"]
+          assert report["screenshot_captured"] is True
+          assert report["native_view_capture"]["backend"] == "winit_x11_argb_pango_cairo"
+          assert overlay["backend"] == "linux_x11"
+          assert overlay["window_depth"] == 32
+          assert overlay["input_rectangle_count"] > 0
+          assert overlay["alpha_pixel_count"] > 0
+          assert overlay["opaque_pixel_count"] > 0
+          assert overlay["position"]["x"] == 360
+          assert overlay["position"]["y"] == 240
+          assert (root / "desktop-pet.png").stat().st_size > 1024
+          PY
+
       - name: Build real GTK4 proof application
         id: gtk-build
         run: |
